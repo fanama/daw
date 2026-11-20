@@ -1,0 +1,57 @@
+package jsonstore_test
+
+import (
+	"testing"
+	"time"
+
+	"gorecord/domain/mix"
+	"gorecord/domain/session"
+	"gorecord/infrastructure/jsonstore"
+)
+
+func TestEncodeStateRoundTripsTheProject(t *testing.T) {
+	current, err := session.New("Round trip", 48000, time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	track, err := current.AddTrack("Mic", 1)
+	if err != nil {
+		t.Fatalf("add track: %v", err)
+	}
+	take, err := current.AddTake(track.ID(), "takes/take-001.wav", 120, 1, 48000, false, false, time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("add take: %v", err)
+	}
+	current.SetClick(mix.Click{Enabled: true, BPM: 90, BeatsPerBar: 3, CountInBars: 1})
+	if err := current.SetTakeGain(take.ID(), 3.5); err != nil {
+		t.Fatalf("gain: %v", err)
+	}
+	if err := current.SetTakeTrim(take.ID(), session.Trim{StartFrame: 10, EndFrame: 20}); err != nil {
+		t.Fatalf("trim: %v", err)
+	}
+	if err := current.CompleteTake(take.ID(), 2000); err != nil {
+		t.Fatalf("complete take: %v", err)
+	}
+	encoded, err := jsonstore.EncodeState(current.State())
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	restored, err := jsonstore.RestoreSession(encoded)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if restored.Name() != "Round trip" || restored.SampleRate() != 48000 {
+		t.Fatalf("unexpected session: %q at %d Hz", restored.Name(), restored.SampleRate())
+	}
+	if restored.Click().BPM != 90 || !restored.Click().Enabled {
+		t.Fatalf("unexpected click: %+v", restored.Click())
+	}
+	tracks := restored.Tracks()
+	takes := restored.Takes()
+	if len(tracks) != 1 || len(takes) != 1 {
+		t.Fatalf("expected one track and one take, got %d/%d", len(tracks), len(takes))
+	}
+	if takes[0].GainDB() != 3.5 || takes[0].Trim().StartFrame != 10 || takes[0].StartFrame() != 120 {
+		t.Fatalf("unexpected take: %+v", takes[0])
+	}
+}

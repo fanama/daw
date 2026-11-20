@@ -1,0 +1,917 @@
+// gorecord browser page. The Go/wasm core owns the session model; this module
+// renders it, runs the Web Audio transport, and persists audio in IndexedDB.
+
+import * as storage from "./storage.js";
+import { AudioEngine } from "./audio.js";
+import { computePeaks, drawTimeline, frameAtX } from "./waveform.js";
+import { audibleTakes, formatDuration, takeLength } from "./model.js";
+import { effectGraph } from "./fxgraph.js";
+
+const App = {
+  state: null,
+  root: null,
+  pcm: new Map(),
+  peaks: new Map(),
+  engine: null,
+  selectedTrackId: null,
+  frame: 0,
+  playing: false,
+  recording: false,
+  pendingTake: null,
+  rafHandle: 0,
+  sessions: [],
+  saving: Promise.resolve(),
+  eqGraph: null,
+  eqTrackId: null,
+};
+
+const VOLUME_KEY = "gorecord.masterVolume";
+
+// Keep a connection open for the launcher. Closing the window closes it and
+// lets the Go server stop; reloads reconnect within the shutdown grace period.
+const appLive = new EventSource("/__gorecord/events");
+appLive.onerror = () => {};
+
+const EFFECT_BLOCKS = [
+  ["Amp", "Amp", [["Drive", "Drive", 0, 1, 0.01], ["Level", "LevelDB", -24, 6, 0.5], ["Bass", "BassDB", -12, 12, 0.5], ["Mid", "MidDB", -12, 12, 0.5], ["Treble", "TrebleDB", -12, 12, 0.5]]],
+  ["Cabinet", "Cab", [["Character", "Character", 0, 1, 0.01]]],
+  ["Equalizer", "EQ", [["Low", "Bands.0.GainDB", -24, 24, 0.5], ["Mid", "Bands.1.GainDB", -24, 24, 0.5], ["High", "Bands.2.GainDB", -24, 24, 0.5]]],
+  ["Compressor", "Comp", [["Threshold", "ThresholdDB", -60, 0, 1], ["Ratio", "Ratio", 1, 20, 0.5], ["Makeup", "MakeupDB", 0, 24, 0.5]]],
+  ["Reverb", "Reverb", [["Size", "Size", 0, 1, 0.01], ["Damp", "Damp", 0, 1, 0.01], ["Mix", "Mix", 0, 1, 0.01]]],
+];
+
+function element(tag, className = "", text = "") {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text) node.textContent = text;
+  return node;
+}
+
+function coreRequest(op, params = {}) {
+  const raw = window.gorecordCore(JSON.stringify({ op, ...params }));
+  const result = JSON.parse(raw);
+  if (!result.ok) throw new Error(result.error || "The command failed.");
+  return result;
+}
+
+function registerPCM(file, audio) {
+  window.gorecordSetPCM(
+    file,
+    new Uint8Array(audio.samples.buffer, audio.samples.byteOffset, audio.samples.byteLength),
+    audio.channels,
+    audio.sampleRate,
+  );
+}
+
+function nextPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function setStatus(text, kind = "") {
+  document.getElementById("status").textContent = text;
+  const bar = document.querySelector(".statusbar");
+  bar.classList.toggle("error", kind === "error");
+  bar.classList.toggle("busy", kind === "busy");
+}
+
+async function loadCore() {
+  const go = new Go();
+  let instance;
+  try {
+    instance = await WebAssembly.instantiateStreaming(fetch("gorecord.wasm"), go.importObject);
+  } catch (error) {
+    const bytes = await (await fetch("gorecord.wasm")).arrayBuffer();
+    instance = await WebAssembly.instantiate(bytes, go.importObject);
+  }
+  go.run(instance.instance);
+  for (let attempt = 0; attempt < 150 && !window.gorecordReady; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!window.gorecordReady) throw new Error("The session core did not start.");
+}
+
+async function boot() {
+  if (!window.WebAssembly || !window.indexedDB) {
+    document.getElementById("picker").innerHTML = "<div class=\"card\"><h1>gorecord</h1><p class=\"lead\">This browser needs WebAssembly and IndexedDB to record.</p></div>";
+    return;
+  }
+  window.gorecordHost = {
+    save(root, project, name) {
+      App.saving = App.saving.then(() => storage.saveProject(root, project, name)).catch((error) => console.error(error));
+    },
+  };
+  try {
+    await loadCore();
+  } catch (error) {
+    setStatus(error.message, "error");
+    document.getElementById("picker").innerHTML = `<div class="card"><h1>gorecord</h1><p class="lead">${error.message}</p></div>`;
+    return;
+  }
+  bindControls();
+  await refreshSessions();
+  window.setInterval(() => {
+    if (!App.state) return;
+    updateMeters();
+    updateTuner();
+  }, 120);
+  window.setInterval(updateSpectrum, 50);
+}
+
+function bindControls() {
+  document.getElementById("btn-record").addEventListener("click", toggleRecord);
+  document.getElementById("btn-play").addEventListener("click", togglePlayback);
+  document.getElementById("btn-stop").addEventListener("click", () => (App.recording ? stopRecording() : stopTransport()));
+  document.getElementById("btn-export").addEventListener("click", exportMix);
+  document.getElementById("btn-sessions").addEventListener("click", showPicker);
+  document.getElementById("btn-add-track").addEventListener("click", addInputTrack);
+  document.getElementById("btn-add-pc").addEventListener("click", addSystemTrack);
+  document.getElementById("monitor-enabled").addEventListener("change", (event) => {
+    App.engine?.setMonitor(event.target.checked);
+    if (event.target.checked) openMonitoring();
+  });
+  const volume = document.getElementById("master-volume");
+  volume.value = String(Math.round(readVolume() * 100));
+  updateVolumeLabel();
+  volume.addEventListener("input", () => {
+    const level = Math.min(1, Math.max(0, Number(volume.value) / 100));
+    window.localStorage.setItem(VOLUME_KEY, String(level));
+    updateVolumeLabel();
+    App.engine?.setMasterVolume(level);
+  });
+  document.getElementById("click-enabled").addEventListener("change", pushClick);
+  document.getElementById("click-bpm").addEventListener("change", pushClick);
+  document.getElementById("timeline").addEventListener("pointerdown", seekFromPointer);
+  document.getElementById("new-session").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = document.getElementById("session-name-input").value.trim();
+    createSession(name, Number(document.getElementById("session-rate").value));
+  });
+  window.addEventListener("resize", drawTimelineNow);
+  window.addEventListener("keydown", (event) => {
+    if (event.target.closest("input, select, textarea, button")) return;
+    if (event.code === "Space") {
+      event.preventDefault();
+      togglePlayback();
+    }
+    if (event.key.toLowerCase() === "r") toggleRecord();
+    if (event.key.toLowerCase() === "p") togglePlayback();
+  });
+  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+}
+
+function applyState(next) {
+  App.state = next;
+  App.root = next.root;
+  if (!App.selectedTrackId || !next.tracks.some((track) => track.id === App.selectedTrackId)) {
+    App.selectedTrackId = next.tracks[0]?.id || null;
+  }
+  pruneAudio(next);
+  App.engine?.syncMonitoring(next);
+  App.engine?.syncTakeLevels(next);
+  App.engine?.setClick(next.click);
+  document.getElementById("session-name").textContent = next.name;
+  document.getElementById("session-info").textContent = `${next.sampleRate / 1000} kHz · ${next.tracks.length} track(s) · ${next.takes.length} take(s)`;
+  renderTracks();
+  renderInspector();
+  renderTransport();
+  drawTimelineNow();
+}
+
+function pruneAudio(state) {
+  const files = new Set(state.takes.map((take) => take.file));
+  for (const file of [...App.pcm.keys()]) {
+    if (files.has(file)) continue;
+    App.pcm.delete(file);
+    App.peaks.delete(file);
+    window.gorecordClearPCM(file);
+    App.engine?.invalidate(file);
+    if (App.root) storage.deleteTake(App.root, file).catch((error) => console.error(error));
+  }
+}
+
+function currentTrack() {
+  return App.state?.tracks.find((track) => track.id === App.selectedTrackId) || null;
+}
+
+function selectTrack(id) {
+  App.selectedTrackId = id;
+  renderTracks();
+  renderInspector();
+  drawTimelineNow();
+}
+
+async function dispatch(op, params) {
+  try {
+    const result = coreRequest(op, params);
+    if (result.state) applyState(result.state);
+    return result;
+  } catch (error) {
+    setStatus(error.message, "error");
+    return null;
+  }
+}
+
+function toggleButton(kind, label, on, title, handler) {
+  const button = element("button", `${kind}${on ? " on" : ""}`, label);
+  button.title = title;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    handler();
+  });
+  return button;
+}
+
+function renderTracks() {
+  const list = document.getElementById("track-list");
+  list.innerHTML = "";
+  App.meterNodes = new Map();
+  if (!App.state) return;
+  if (!App.state.tracks.length) {
+    list.append(element("p", "hint", "No tracks yet. Add one with +."));
+    return;
+  }
+  for (const track of App.state.tracks) list.append(trackRow(track));
+}
+
+function trackRow(track) {
+  const row = element("div", `track${track.id === App.selectedTrackId ? " selected" : ""}`);
+  row.addEventListener("click", (event) => {
+    if (event.target.closest("input, select, button")) return;
+    selectTrack(track.id);
+  });
+  const top = element("div", "track-top");
+  const name = document.createElement("input");
+  name.className = "track-name";
+  name.value = track.name;
+  name.title = "Track name";
+  name.addEventListener("change", () => dispatch("track.rename", { trackId: track.id, name: name.value }));
+  top.append(name, element("span", "track-kind", track.source === "system" ? "PC" : `in ${track.channel + 1}`));
+  const controls = element("div", "track-controls");
+  controls.append(
+    toggleButton("arm", "●", track.armed, "Arm this track", async () => {
+      await dispatch("track.arm", { trackId: track.id, armed: !track.armed });
+      if (!App.recording) openMonitoring();
+    }),
+    toggleButton("mute", "M", track.muted, "Mute", () => dispatch("track.mute", { trackId: track.id, muted: !track.muted })),
+    toggleButton("solo", "S", track.soloed, "Solo", () => dispatch("track.solo", { trackId: track.id, soloed: !track.soloed })),
+  );
+  const meter = element("span", "meter");
+  const bar = document.createElement("i");
+  meter.append(bar);
+  controls.append(meter);
+  const remove = element("button", "delete", "×");
+  remove.title = "Delete this track";
+  remove.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (window.confirm(`Delete "${track.name}" and its takes?`)) dispatch("track.remove", { trackId: track.id });
+  });
+  controls.append(remove);
+  const source = document.createElement("select");
+  source.className = "track-source";
+  source.title = "Recording source";
+  for (const [value, label] of [["input:0", "Input 1"], ["input:1", "Input 2"], ["system", "PC audio"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    source.append(option);
+  }
+  source.value = track.source === "system" ? "system" : `input:${track.channel}`;
+  source.addEventListener("change", () => {
+    const [kind, channel] = source.value.split(":");
+    dispatch("track.source", { trackId: track.id, source: kind, channel: Number(channel || 0) });
+  });
+  row.append(top, controls, source);
+  App.meterNodes.set(track.id, bar);
+  return row;
+}
+
+function addInputTrack() {
+  const name = window.prompt("Track name", "Guitar");
+  if (!name) return;
+  const used = new Set(App.state.tracks.filter((track) => track.source === "input").map((track) => track.channel));
+  const channel = used.has(0) ? 1 : 0;
+  dispatch("track.add", { name, source: "input", channel });
+}
+
+function addSystemTrack() {
+  const name = window.prompt("Track name", "PC audio");
+  if (!name) return;
+  dispatch("track.add", { name, source: "system", channel: 0 });
+}
+
+function renderInspector() {
+  const panel = document.getElementById("inspector");
+  panel.innerHTML = "";
+  App.eqGraph = null;
+  App.eqTrackId = null;
+  const track = currentTrack();
+  if (!track) {
+    panel.append(element("p", "empty", "Select a track to edit its takes and effects."));
+    return;
+  }
+  panel.append(element("h2", "", track.name));
+  panel.append(takesSection(track));
+  if (track.source === "input") panel.append(effectsSection(track));
+}
+
+function takesSection(track) {
+  const section = element("div");
+  section.append(element("h3", "", "Take stack"));
+  const takes = App.state.takes.filter((take) => take.trackId === track.id);
+  if (!takes.length) {
+    section.append(element("p", "empty", "No takes yet."));
+    return section;
+  }
+  takes.forEach((take, index) => section.append(takeRow(track, take, index)));
+  return section;
+}
+
+function takeRow(track, take, index) {
+  const row = element("div", `take${take.id === track.activeTakeId ? " active" : ""}`);
+  const head = element("div", "take-head");
+  const active = document.createElement("input");
+  active.type = "radio";
+  active.name = `active-${track.id}`;
+  active.checked = take.id === track.activeTakeId;
+  active.title = "Make this take audible";
+  active.addEventListener("change", () => dispatch("take.active", { trackId: track.id, takeId: take.id }));
+  const name = element("span", "take-name", `take ${index + 1}${take.incomplete ? " · partial" : ""}`);
+  const meta = element("span", "take-meta", formatDuration(takeLength(take) / take.sampleRate));
+  const normalize = element("button", "", "normalize");
+  normalize.title = "Set the gain so the loudest peak reaches -1 dBFS";
+  normalize.addEventListener("click", () => normalizeTake(take));
+  const remove = element("button", "", "×");
+  remove.title = "Delete this take";
+  remove.addEventListener("click", () => {
+    if (window.confirm(`Delete take ${index + 1}?`)) dispatch("take.delete", { takeId: take.id });
+  });
+  head.append(active, name, meta, normalize, remove);
+  const controls = element("div", "take-controls");
+  const muteLabel = document.createElement("label");
+  const mute = document.createElement("input");
+  mute.type = "checkbox";
+  mute.checked = take.muted;
+  mute.addEventListener("change", () => dispatch("take.mute", { takeId: take.id, muted: mute.checked }));
+  muteLabel.append(mute, document.createTextNode("mute"));
+  const gainLabel = document.createElement("label");
+  const gain = document.createElement("input");
+  gain.type = "range";
+  gain.min = "-24";
+  gain.max = "24";
+  gain.step = "0.5";
+  gain.value = take.gainDb;
+  const gainValue = element("span", "gain-value", `${take.gainDb.toFixed(1)} dB`);
+  gain.addEventListener("input", () => { gainValue.textContent = `${Number(gain.value).toFixed(1)} dB`; });
+  gain.addEventListener("change", () => dispatch("take.gain", { takeId: take.id, gainDb: Number(gain.value) }));
+  gainLabel.append(document.createTextNode("gain"), gain, gainValue);
+  controls.append(muteLabel, gainLabel, trimControl(take, "in", true), trimControl(take, "out", false));
+  row.append(head, controls);
+  return row;
+}
+
+function trimControl(take, label, isStart) {
+  const wrapper = document.createElement("label");
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0";
+  input.step = "0.01";
+  input.value = ((isStart ? take.trim.startFrame : take.trim.endFrame || take.lengthFrames) / take.sampleRate).toFixed(2);
+  input.title = `Trim ${label} in seconds`;
+  input.addEventListener("change", () => {
+    const startFrame = isStart ? Math.max(0, Math.round(Number(input.value) * take.sampleRate)) : take.trim.startFrame;
+    let endFrame = isStart ? take.trim.endFrame : Math.round(Number(input.value) * take.sampleRate);
+    if (!isStart && endFrame >= take.lengthFrames) endFrame = 0;
+    dispatch("take.trim", { takeId: take.id, startFrame, endFrame });
+  });
+  wrapper.append(document.createTextNode(label), input, document.createTextNode("s"));
+  return wrapper;
+}
+
+async function normalizeTake(take) {
+  const audio = App.pcm.get(take.file);
+  if (!audio) return setStatus("This take's audio is not loaded.", "error");
+  setStatus("Measuring the peak…", "busy");
+  await nextPaint();
+  try {
+    registerPCM(take.file, audio);
+    applyState(coreRequest("take.normalize", { takeId: take.id }).state);
+    setStatus("Normalized to -1 dBFS");
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    window.gorecordClearPCM(take.file);
+  }
+}
+
+function effectsSection(track) {
+  const section = element("div");
+  section.append(element("h3", "", "Monitor effects"));
+  for (const [title, key, controls] of EFFECT_BLOCKS) {
+    section.append(effectBlock(track, title, key, controls));
+  }
+  return section;
+}
+
+function effectBlock(track, title, key, controls) {
+  const block = element("div", "fx");
+  const head = document.createElement("label");
+  head.className = "fx-head";
+  const toggle = document.createElement("input");
+  toggle.type = "checkbox";
+  toggle.checked = Boolean(track.effects[key]?.Enabled);
+  toggle.addEventListener("change", () => {
+    const effects = cloneEffects(track.effects);
+    effects[key].Enabled = toggle.checked;
+    dispatch("track.effects", { trackId: track.id, effects });
+  });
+  head.append(toggle, document.createTextNode(title));
+  block.append(head);
+  const graph = effectGraph(key, track.effects[key], App.state.sampleRate);
+  if (graph) block.append(graph.element);
+  if (graph && key === "EQ") {
+    App.eqGraph = graph;
+    App.eqTrackId = track.id;
+  }
+  for (const [label, path, min, max, step] of controls) {
+    block.append(effectRow(track, key, label, path, min, max, step, graph));
+  }
+  return block;
+}
+
+function effectRow(track, key, label, path, min, max, step, graph) {
+  const row = element("div", "fx-row");
+  row.append(element("span", "", label));
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.min = min;
+  slider.max = max;
+  slider.step = step;
+  const current = Number(readPath(track.effects[key], path));
+  slider.value = Number.isFinite(current) ? current : min;
+  const value = element("span", "value", formatEffectValue(Number(slider.value), max - min));
+  slider.addEventListener("input", () => {
+    value.textContent = formatEffectValue(Number(slider.value), max - min);
+    if (!graph) return;
+    const preview = cloneEffects(track.effects);
+    writePath(preview[key], path, Number(slider.value));
+    graph.update(preview[key]);
+  });
+  slider.addEventListener("change", () => {
+    const effects = cloneEffects(track.effects);
+    writePath(effects[key], path, Number(slider.value));
+    dispatch("track.effects", { trackId: track.id, effects });
+  });
+  row.append(slider, value);
+  return row;
+}
+
+function cloneEffects(effects) {
+  return JSON.parse(JSON.stringify(effects));
+}
+
+function readPath(object, path) {
+  return path.split(".").reduce((value, key) => (value == null ? undefined : value[key]), object);
+}
+
+function writePath(object, path, value) {
+  const keys = path.split(".");
+  let target = object;
+  for (const key of keys.slice(0, -1)) target = target[key];
+  target[keys[keys.length - 1]] = value;
+}
+
+function formatEffectValue(value, span) {
+  return span <= 2 ? value.toFixed(2) : value.toFixed(1);
+}
+
+function renderTransport() {
+  const app = document.getElementById("app");
+  app.classList.toggle("recording", App.recording);
+  app.classList.toggle("playing", App.playing && !App.recording);
+  document.getElementById("btn-record").title = App.recording ? "Stop recording (R)" : "Record (R)";
+  updateTimecode();
+}
+
+function updateTimecode() {
+  const rate = App.state?.sampleRate || 48000;
+  document.getElementById("timecode").textContent = formatDuration(App.frame / rate);
+}
+
+function syncControls() {
+  if (!App.state) return;
+  document.getElementById("click-enabled").checked = Boolean(App.state.click.Enabled);
+  document.getElementById("click-bpm").value = App.state.click.BPM;
+  document.getElementById("track-list").scrollTop = 0;
+  renderTransport();
+}
+
+function pushClick() {
+  if (!App.state) return;
+  const enabled = document.getElementById("click-enabled").checked;
+  const bpm = Math.min(300, Math.max(20, Number(document.getElementById("click-bpm").value) || 120));
+  dispatch("click.set", { enabled, bpm, beatsPerBar: App.state.click.beatsPerBar, countInBars: 0 });
+}
+
+function ensureEngine() {
+  if (!App.engine) {
+    App.engine = new AudioEngine();
+    App.engine.setMonitor(document.getElementById("monitor-enabled").checked);
+    App.engine.setMasterVolume(readVolume());
+  }
+  return App.engine;
+}
+
+function readVolume() {
+  const raw = window.localStorage.getItem(VOLUME_KEY);
+  if (raw === null) return 1;
+  const level = Number(raw);
+  return Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 1;
+}
+
+function updateVolumeLabel() {
+  const level = Number(document.getElementById("master-volume").value) || 0;
+  document.getElementById("master-volume-value").textContent = `${Math.round(level)}%`;
+}
+
+function disposeEngine() {
+  if (App.engine) App.engine.dispose();
+  App.engine = null;
+}
+
+async function openMonitoring() {
+  if (!App.state || App.recording) return;
+  const armed = App.state.tracks.filter((track) => track.armed);
+  if (!armed.length || armed.some((track) => track.source === "system")) return;
+  const engine = ensureEngine();
+  try {
+    await engine.openInput(false, App.state.sampleRate);
+    engine.syncMonitoring(App.state);
+    setStatus("Monitoring — press record to capture.");
+  } catch (error) {
+    setStatus(inputErrorMessage(error), "error");
+  }
+}
+
+async function toggleRecord() {
+  if (App.recording) return stopRecording();
+  return startRecording();
+}
+
+async function startRecording() {
+  if (!App.state) return;
+  const armed = App.state.tracks.filter((track) => track.armed);
+  if (!armed.length) return setStatus("Arm a track before recording.", "error");
+  const system = armed.length === 1 && armed[0].source === "system";
+  if (!system && armed.some((track) => track.source === "system")) {
+    return setStatus("Record the PC audio track on its own, then layer inputs over it.", "error");
+  }
+  const engine = ensureEngine();
+  try {
+    await engine.openInput(system, App.state.sampleRate);
+  } catch (error) {
+    return setStatus(inputErrorMessage(error), "error");
+  }
+  engine.syncMonitoring(App.state);
+  const playhead = Math.round(App.frame);
+  const takeStart = Math.max(0, playhead - engine.latencyFrames);
+  const drop = Math.max(0, engine.latencyFrames - playhead + takeStart);
+  let begin;
+  try {
+    begin = coreRequest("take.begin", { startFrame: takeStart });
+  } catch (error) {
+    return setStatus(error.message, "error");
+  }
+  App.pendingTake = {
+    takes: (begin.takes || []).map((start) => ({
+      takeId: start.id,
+      takeFile: start.file,
+      trackId: start.trackId,
+      channels: start.channels,
+    })),
+    startFrame: takeStart,
+    drop,
+    playhead,
+  };
+  App.recording = true;
+  App.playing = true;
+  applyState(begin.state);
+  try {
+    await engine.start(App.state, App.pcm, playhead, { record: true, slots: begin.slots });
+  } catch (error) {
+    App.recording = false;
+    App.playing = false;
+    const takes = App.pendingTake?.takes || [];
+    App.pendingTake = null;
+    for (const take of takes) await dispatch("take.abort", { takeId: take.takeId });
+    return setStatus(error.message, "error");
+  }
+  ensureAnimation();
+  if (system) setStatus("Recording PC audio…");
+  else if (armed.length > 1) setStatus(`Recording ${armed.length} inputs…`);
+  else setStatus("Recording…");
+}
+
+async function stopRecording() {
+  const pending = App.pendingTake;
+  if (!pending) return;
+  App.pendingTake = null;
+  App.recording = false;
+  App.playing = false;
+  const captured = App.engine ? await App.engine.stopRecording(pending.drop) : null;
+  App.frame = 0;
+  renderTransport();
+  if (!captured || captured.length !== pending.takes.length || captured[0].frames < 128) {
+    for (const take of pending.takes) await dispatch("take.abort", { takeId: take.takeId });
+    return setStatus("The take was too short to keep.", "error");
+  }
+  let state = null;
+  try {
+    pending.takes.forEach((take, index) => {
+      const audio = {
+        channels: captured[index].channels,
+        sampleRate: captured[index].sampleRate,
+        samples: captured[index].samples,
+      };
+      App.pcm.set(take.takeFile, audio);
+      App.peaks.set(take.takeFile, computePeaks(audio.samples, audio.channels));
+      state = coreRequest("take.finish", { takeId: take.takeId, frames: captured[index].frames }).state;
+    });
+    applyState(state);
+    await Promise.all(pending.takes.map((take) => {
+      const audio = App.pcm.get(take.takeFile);
+      return storage.saveTake(App.root, take.takeFile, audio.channels, audio.sampleRate, audio.samples);
+    }));
+    const label = pending.takes.length === 1 ? "Take saved" : `${pending.takes.length} takes saved`;
+    setStatus(`${label} · ${formatDuration(captured[0].frames / captured[0].sampleRate)}`);
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+  drawTimelineNow();
+}
+
+async function togglePlayback() {
+  if (App.recording) return stopRecording();
+  if (!App.state) return;
+  if (App.playing) return stopTransport();
+  if (!audibleTakes(App.state).length) return setStatus("Record a take or select an audible one first.", "error");
+  const engine = ensureEngine();
+  try {
+    await engine.start(App.state, App.pcm, Math.round(App.frame));
+  } catch (error) {
+    return setStatus(error.message, "error");
+  }
+  App.playing = true;
+  renderTransport();
+  ensureAnimation();
+  setStatus("Playing");
+}
+
+function stopTransport() {
+  const frame = App.engine ? App.engine.position() : 0;
+  App.engine?.stop();
+  App.playing = false;
+  App.recording = false;
+  App.frame = 0;
+  renderTransport();
+  drawTimelineNow();
+  updateMeters();
+  if (frame > 0) setStatus("Stopped");
+}
+
+function seekFromPointer(event) {
+  if (!App.state) return;
+  const canvas = event.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  const frame = frameAtX(canvas, event.clientX - rect.left);
+  if (App.playing) stopTransport();
+  App.frame = frame;
+  updateTimecode();
+  drawTimelineNow();
+}
+
+async function exportMix() {
+  if (!App.state) return;
+  const selection = audibleTakes(App.state);
+  if (!selection.length) return setStatus("Nothing to export: select an audible take first.", "error");
+  for (const { take } of selection) {
+    const audio = App.pcm.get(take.file);
+    if (!audio) return setStatus(`Missing audio for ${take.file}.`, "error");
+    registerPCM(take.file, audio);
+  }
+  setStatus("Rendering the mix…", "busy");
+  await nextPaint();
+  try {
+    const result = coreRequest("export");
+    const bytes = window.gorecordExportWAV();
+    if (!bytes) throw new Error("The mix could not be rendered.");
+    download(`${App.state.name}.wav`, bytes);
+    setStatus(`Exported ${formatDuration(result.frames / App.state.sampleRate)}`);
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    for (const { take } of selection) window.gorecordClearPCM(take.file);
+  }
+}
+
+function download(name, bytes) {
+  const safe = name.replace(/[\\/:*?"<>|]+/g, "-");
+  const url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = safe.toLowerCase().endsWith(".wav") ? safe : `${safe}.wav`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function ensureAnimation() {
+  if (!App.rafHandle) App.rafHandle = requestAnimationFrame(animate);
+}
+
+function animate() {
+  App.rafHandle = 0;
+  if (!App.state) return;
+  if (App.playing || App.recording) {
+    App.frame = App.engine ? App.engine.position() : App.frame;
+    updateTimecode();
+  }
+  drawTimelineNow();
+  updateMeters();
+  updateTuner();
+  if (App.playing || App.recording) ensureAnimation();
+}
+
+function drawTimelineNow() {
+  if (!App.state) return;
+  const canvas = document.getElementById("timeline");
+  let live = null;
+  if (App.pendingTake && App.engine) {
+    const peaks = App.engine.livePeaks();
+    live = peaks.map((item) => ({ ...item, startFrame: App.pendingTake.startFrame }));
+  }
+  drawTimeline(canvas, {
+    state: App.state,
+    peaks: App.peaks,
+    live,
+    frame: App.frame,
+    selectedTrackId: App.selectedTrackId,
+  });
+}
+
+function updateSpectrum() {
+  const graph = App.eqGraph;
+  if (!graph) return;
+  const track = currentTrack();
+  if (!track || track.id !== App.eqTrackId || !App.engine) {
+    graph.spectrum(null);
+    return;
+  }
+  graph.spectrum(App.engine.spectrum(track.id));
+}
+
+function updateMeters() {
+  if (!App.state || !App.meterNodes) return;
+  for (const [id, bar] of App.meterNodes) {
+    const peak = App.engine ? App.engine.meter(id) : 0;
+    const decibels = 20 * Math.log10(peak || 0.000001);
+    bar.style.width = `${Math.max(0, Math.min(100, ((decibels + 60) / 60) * 100))}%`;
+    bar.classList.toggle("hot", decibels > -6);
+    bar.classList.toggle("clip", peak >= 0.999);
+  }
+}
+
+function updateTuner() {
+  const display = document.getElementById("tuner");
+  if (!App.state || !App.engine) {
+    display.textContent = "—";
+    display.classList.add("off");
+    return;
+  }
+  const track = currentTrack();
+  if (!track || track.source === "system") {
+    display.textContent = "—";
+    display.classList.add("off");
+    return;
+  }
+  const reading = App.engine.tuner(track.channel);
+  if (!reading) {
+    display.textContent = "—";
+    display.classList.add("off");
+    return;
+  }
+  display.classList.remove("off");
+  const sign = reading.cents > 0 ? "+" : "";
+  display.textContent = `${reading.note} ${sign}${reading.cents}¢`;
+  display.style.color = Math.abs(reading.cents) <= 5 ? "var(--accent)" : "var(--warn)";
+}
+
+function inputErrorMessage(error) {
+  if (error?.name === "NotAllowedError") return "Microphone access was denied. Allow it in the site settings and try again.";
+  if (error?.name === "NotFoundError") return "No audio input was found on this device.";
+  if (error?.name === "NotReadableError") return "The audio input is busy in another application.";
+  return error?.message || "The audio input could not be opened.";
+}
+
+function showPicker() {
+  document.getElementById("picker").hidden = false;
+  document.getElementById("app").hidden = true;
+  refreshSessions();
+}
+
+async function refreshSessions() {
+  try {
+    App.sessions = await storage.listSessions();
+  } catch (error) {
+    App.sessions = [];
+  }
+  const list = document.getElementById("session-list");
+  list.innerHTML = "";
+  if (!App.sessions.length) {
+    list.append(element("p", "hint", "No sessions yet. Create one below."));
+    return;
+  }
+  for (const session of App.sessions) {
+    const card = element("div", "session-card");
+    const meta = element("div", "meta");
+    meta.append(element("div", "name", session.name), element("div", "date", new Date(session.updatedAt).toLocaleString()));
+    const open = element("button", "", "Open");
+    open.addEventListener("click", () => openSession(session.root));
+    const remove = element("button", "", "Delete");
+    remove.addEventListener("click", () => deleteSession(session));
+    card.append(meta, open, remove);
+    list.append(card);
+  }
+  if (App.state) {
+    const back = element("button", "ghost", "Back to current session");
+    back.addEventListener("click", () => {
+      document.getElementById("picker").hidden = true;
+      document.getElementById("app").hidden = false;
+    });
+    list.append(back);
+  }
+}
+
+async function openSession(root) {
+  try {
+    const record = await storage.loadProject(root);
+    if (!record) throw new Error("That session could not be found.");
+    const result = coreRequest("open", { root, project: record.project });
+    const takes = await storage.loadTakes(root);
+    disposeEngine();
+    App.pcm = new Map(takes.map((take) => [take.file, { channels: take.channels, sampleRate: take.sampleRate, samples: take.samples }]));
+    App.peaks = new Map(takes.map((take) => [take.file, computePeaks(take.samples, take.channels)]));
+    App.frame = 0;
+    App.playing = false;
+    App.recording = false;
+    App.pendingTake = null;
+    App.selectedTrackId = null;
+    applyState(result.state);
+    syncControls();
+    document.getElementById("picker").hidden = true;
+    document.getElementById("app").hidden = false;
+    setStatus(`Opened ${result.state.name}`);
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+async function createSession(name, sampleRate) {
+  if (!name) return;
+  if (App.sessions.some((session) => session.name.toLowerCase() === name.toLowerCase())) {
+    return setStatus("A session with this name already exists.", "error");
+  }
+  try {
+    const result = coreRequest("create", { name, sampleRate });
+    disposeEngine();
+    App.pcm = new Map();
+    App.peaks = new Map();
+    App.frame = 0;
+    App.playing = false;
+    App.recording = false;
+    App.pendingTake = null;
+    App.selectedTrackId = null;
+    applyState(result.state);
+    syncControls();
+    document.getElementById("picker").hidden = true;
+    document.getElementById("app").hidden = false;
+    setStatus("Session created — arm the track and record.");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+async function deleteSession(session) {
+  if (!window.confirm(`Delete session "${session.name}" and all its audio?`)) return;
+  await storage.deleteSession(session.root);
+  if (App.root === session.root) {
+    disposeEngine();
+    App.state = null;
+    App.pcm.clear();
+    App.peaks.clear();
+    document.getElementById("app").hidden = true;
+  }
+  refreshSessions();
+}
+
+boot();
