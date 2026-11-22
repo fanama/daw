@@ -3,7 +3,7 @@
 
 import * as storage from "./storage.js";
 import { AudioEngine } from "./audio.js";
-import { computePeaks, drawTimeline, frameAtX } from "./waveform.js";
+import { computePeaks, drawTimeline, frameAtX, markerAtX } from "./waveform.js";
 import { audibleTakes, formatDuration, takeLength } from "./model.js";
 import { effectGraph } from "./fxgraph.js";
 
@@ -17,6 +17,7 @@ const App = {
   frame: 0,
   playing: false,
   recording: false,
+  countingIn: false,
   pendingTake: null,
   rafHandle: 0,
   sessions: [],
@@ -123,6 +124,7 @@ function bindControls() {
   document.getElementById("btn-record").addEventListener("click", toggleRecord);
   document.getElementById("btn-play").addEventListener("click", togglePlayback);
   document.getElementById("btn-stop").addEventListener("click", () => (App.recording ? stopRecording() : stopTransport()));
+  document.getElementById("btn-marker").addEventListener("click", addMarker);
   document.getElementById("btn-export").addEventListener("click", exportMix);
   document.getElementById("btn-sessions").addEventListener("click", showPicker);
   document.getElementById("btn-add-track").addEventListener("click", addInputTrack);
@@ -142,7 +144,9 @@ function bindControls() {
   });
   document.getElementById("click-enabled").addEventListener("change", pushClick);
   document.getElementById("click-bpm").addEventListener("change", pushClick);
+  document.getElementById("count-in").addEventListener("change", pushClick);
   document.getElementById("timeline").addEventListener("pointerdown", seekFromPointer);
+  document.getElementById("timeline").addEventListener("contextmenu", deleteMarkerAt);
   document.getElementById("new-session").addEventListener("submit", (event) => {
     event.preventDefault();
     const name = document.getElementById("session-name-input").value.trim();
@@ -157,6 +161,7 @@ function bindControls() {
     }
     if (event.key.toLowerCase() === "r") toggleRecord();
     if (event.key.toLowerCase() === "p") togglePlayback();
+    if (event.key.toLowerCase() === "m") addMarker();
   });
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 }
@@ -238,7 +243,7 @@ function renderTracks() {
 function trackRow(track) {
   const row = element("div", `track${track.id === App.selectedTrackId ? " selected" : ""}`);
   row.addEventListener("click", (event) => {
-    if (event.target.closest("input, select, button")) return;
+    if (event.target.closest("input, select, button, .pan-knob")) return;
     selectTrack(track.id);
   });
   const top = element("div", "track-top");
@@ -282,7 +287,7 @@ function trackRow(track) {
     const [kind, channel] = source.value.split(":");
     dispatch("track.source", { trackId: track.id, source: kind, channel: Number(channel || 0) });
   });
-  row.append(top, controls, source, volumeControl(track));
+  row.append(top, controls, source, volumeControl(track), panControl(track));
   App.meterNodes.set(track.id, bar);
   return row;
 }
@@ -304,6 +309,73 @@ function volumeControl(track) {
     dispatch("track.volume", { trackId: track.id, volumeDb: Number(slider.value) });
   });
   wrap.append(element("span", "unit", "vol"), slider, value);
+  return wrap;
+}
+
+function panLabel(value) {
+  if (value === 0) return "C";
+  return `${value < 0 ? "L" : "R"} ${Math.abs(value)}`;
+}
+
+function panControl(track) {
+  const wrap = element("div", "track-pan");
+  wrap.title = "Monitor pan: drag up for right, down for left; double-click to centre";
+  const knob = element("span", "pan-knob");
+  knob.tabIndex = 0;
+  knob.setAttribute("role", "slider");
+  knob.setAttribute("aria-label", "Pan");
+  knob.setAttribute("aria-orientation", "horizontal");
+  knob.setAttribute("aria-valuemin", "-100");
+  knob.setAttribute("aria-valuemax", "100");
+  const pointer = element("i");
+  knob.append(pointer);
+  const value = element("span", "pan-value");
+  let current = Math.round((Number(track.pan) || 0) * 100);
+  const paint = (next) => {
+    current = Math.max(-100, Math.min(100, Math.round(next)));
+    knob.style.setProperty("--pan-angle", `${current * 1.35}deg`);
+    knob.setAttribute("aria-valuenow", String(current));
+    knob.setAttribute("aria-valuetext", current === 0 ? "Centre" : `${Math.abs(current)}% ${current < 0 ? "left" : "right"}`);
+    value.textContent = panLabel(current);
+  };
+  paint(current);
+  let startY = 0;
+  let startValue = 0;
+  knob.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    knob.focus();
+    knob.setPointerCapture(event.pointerId);
+    knob.classList.add("dragging");
+    startY = event.clientY;
+    startValue = current;
+  });
+  knob.addEventListener("pointermove", (event) => {
+    if (!knob.hasPointerCapture(event.pointerId)) return;
+    paint(startValue + ((startY - event.clientY) / 150) * 200);
+  });
+  const commit = (event) => {
+    if (!knob.hasPointerCapture(event.pointerId)) return;
+    knob.releasePointerCapture(event.pointerId);
+    knob.classList.remove("dragging");
+    dispatch("track.pan", { trackId: track.id, pan: current / 100 });
+  };
+  knob.addEventListener("pointerup", commit);
+  knob.addEventListener("pointercancel", commit);
+  knob.addEventListener("dblclick", () => {
+    paint(0);
+    dispatch("track.pan", { trackId: track.id, pan: 0 });
+  });
+  knob.addEventListener("keydown", (event) => {
+    const step = event.shiftKey ? 10 : 5;
+    if (event.key === "ArrowUp" || event.key === "ArrowRight") paint(current + step);
+    else if (event.key === "ArrowDown" || event.key === "ArrowLeft") paint(current - step);
+    else if (event.key === "Home") paint(0);
+    else return;
+    event.preventDefault();
+    dispatch("track.pan", { trackId: track.id, pan: current / 100 });
+  });
+  wrap.append(element("span", "unit", "pan"), knob, value);
   return wrap;
 }
 
@@ -529,6 +601,7 @@ function syncControls() {
   if (!App.state) return;
   document.getElementById("click-enabled").checked = Boolean(App.state.click.Enabled);
   document.getElementById("click-bpm").value = App.state.click.BPM;
+  document.getElementById("count-in").checked = App.state.click.countInBars > 0;
   document.getElementById("track-list").scrollTop = 0;
   renderTransport();
 }
@@ -537,7 +610,8 @@ function pushClick() {
   if (!App.state) return;
   const enabled = document.getElementById("click-enabled").checked;
   const bpm = Math.min(300, Math.max(20, Number(document.getElementById("click-bpm").value) || 120));
-  dispatch("click.set", { enabled, bpm, beatsPerBar: App.state.click.beatsPerBar, countInBars: 0 });
+  const countInBars = document.getElementById("count-in").checked ? 1 : 0;
+  dispatch("click.set", { enabled, bpm, beatsPerBar: App.state.click.beatsPerBar, countInBars });
 }
 
 function ensureEngine() {
@@ -581,6 +655,7 @@ async function openMonitoring() {
 }
 
 async function toggleRecord() {
+  if (App.countingIn) return;
   if (App.recording) return stopRecording();
   return startRecording();
 }
@@ -600,6 +675,22 @@ async function startRecording() {
     return setStatus(inputErrorMessage(error), "error");
   }
   engine.syncMonitoring(App.state);
+  const countInBars = Math.min(2, Math.max(0, Number(App.state.click.countInBars) || 0));
+  if (countInBars > 0) {
+    App.countingIn = true;
+    try {
+      await engine.countIn({
+        bpm: App.state.click.bpm,
+        beatsPerBar: App.state.click.beatsPerBar,
+        bars: countInBars,
+        onBeat: (remaining) => setStatus(`Count-in · ${remaining}`),
+      });
+    } catch (error) {
+      App.countingIn = false;
+      return setStatus(error.message, "error");
+    }
+    App.countingIn = false;
+  }
   const playhead = Math.round(App.frame);
   const takeStart = Math.max(0, playhead - engine.latencyFrames);
   const drop = Math.max(0, engine.latencyFrames - playhead + takeStart);
@@ -706,15 +797,41 @@ function stopTransport() {
   if (frame > 0) setStatus("Stopped");
 }
 
+function addMarker() {
+  if (!App.state) return;
+  const name = window.prompt("Marker name", `Marker ${App.state.markers.length + 1}`);
+  if (name === null) return;
+  dispatch("marker.add", { frame: Math.round(App.frame), name });
+}
+
 function seekFromPointer(event) {
   if (!App.state) return;
   const canvas = event.currentTarget;
-  const rect = canvas.getBoundingClientRect();
-  const frame = frameAtX(canvas, event.clientX - rect.left);
+  const x = event.clientX - canvas.getBoundingClientRect().left;
+  const marker = markerAtX(canvas, x);
+  if (marker) {
+    if (App.playing) stopTransport();
+    App.frame = marker.frame;
+    updateTimecode();
+    drawTimelineNow();
+    setStatus(`Marker: ${marker.name}`);
+    return;
+  }
+  const frame = frameAtX(canvas, x);
   if (App.playing) stopTransport();
   App.frame = frame;
   updateTimecode();
   drawTimelineNow();
+}
+
+function deleteMarkerAt(event) {
+  if (!App.state) return;
+  const canvas = event.currentTarget;
+  const marker = markerAtX(canvas, event.clientX - canvas.getBoundingClientRect().left);
+  if (!marker) return;
+  event.preventDefault();
+  if (!window.confirm(`Delete marker "${marker.name}"?`)) return;
+  dispatch("marker.remove", { markerId: marker.id });
 }
 
 async function exportMix() {

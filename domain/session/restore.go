@@ -11,6 +11,7 @@ func Restore(state State) (*Session, error) {
 	restored.latencyOffset = state.LatencyOffset
 	restored.nextTrack = max(state.NextTrack, 1)
 	restored.nextTake = max(state.NextTake, 1)
+	restored.nextMarker = max(state.NextMarker, 1)
 
 	for _, trackState := range state.Tracks {
 		track, trackErr := trackFromState(trackState)
@@ -26,6 +27,11 @@ func Restore(state State) (*Session, error) {
 		}
 		restored.takes = append(restored.takes, take)
 	}
+	markers, err := markersFromState(state.Markers)
+	if err != nil {
+		return nil, err
+	}
+	restored.markers = markers
 	if err := restored.validate(); err != nil {
 		return nil, err
 	}

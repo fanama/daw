@@ -22,10 +22,12 @@ type Session struct {
 	sampleRate    int
 	tracks        []Track
 	takes         []Take
+	markers       []Marker
 	click         mix.Click
 	latencyOffset int
 	nextTrack     int
 	nextTake      int
+	nextMarker    int
 }
 
 // New creates an empty session at the given sample rate.
@@ -44,6 +46,7 @@ func New(name string, sampleRate int, now time.Time) (*Session, error) {
 		click:      mix.DefaultClick(),
 		nextTrack:  1,
 		nextTake:   1,
+		nextMarker: 1,
 	}, nil
 }
 
@@ -88,6 +91,13 @@ func (s *Session) Takes() []Take {
 	takes := make([]Take, len(s.takes))
 	copy(takes, s.takes)
 	return takes
+}
+
+// Markers returns a copy of the marker collection.
+func (s *Session) Markers() []Marker {
+	markers := make([]Marker, len(s.markers))
+	copy(markers, s.markers)
+	return markers
 }
 
 // FindTrack returns one track by identifier.

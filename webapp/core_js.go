@@ -78,6 +78,8 @@ func (c *core) applyCommand(req request) error {
 		return c.applyTrack(req)
 	case strings.HasPrefix(req.Op, "take."):
 		return c.applyTake(req)
+	case strings.HasPrefix(req.Op, "marker."):
+		return c.applyMarker(req)
 	case req.Op == "click.set":
 		return c.service.SetClick(newClick(req))
 	case req.Op == "latency.set":
@@ -105,6 +107,8 @@ func (c *core) applyTrack(req request) error {
 		return c.service.SetSolo(trackID, req.Soloed)
 	case "track.volume":
 		return c.service.SetTrackVolume(trackID, req.VolumeDB)
+	case "track.pan":
+		return c.service.SetTrackPan(trackID, req.Pan)
 	case "track.source":
 		return c.service.SetSource(trackID, trackSource(req.Source, req.Channel))
 	case "track.print":
@@ -138,6 +142,18 @@ func (c *core) applyTake(req request) error {
 		return c.service.DeleteTake(takeID)
 	default:
 		return fmt.Errorf("unknown take command %q", req.Op)
+	}
+}
+
+func (c *core) applyMarker(req request) error {
+	switch req.Op {
+	case "marker.add":
+		_, err := c.service.AddMarker(req.Frame, req.Name)
+		return err
+	case "marker.remove":
+		return c.service.RemoveMarker(session.MarkerID(req.MarkerID))
+	default:
+		return fmt.Errorf("unknown marker command %q", req.Op)
 	}
 }
 

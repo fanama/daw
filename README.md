@@ -41,13 +41,19 @@ packaging/macos/   Info.plist for the double-clickable app bundle
   compressor → reverb. The equalizer has five bands at 20 Hz, 100 Hz, 1 kHz,
   6 kHz and 20 kHz. The chain is heard on live monitoring and on the playback
   of recorded takes, but it is never printed into a take.
-- Per-track monitor volume fader: it changes what monitoring and take playback
-  sound like, but it is not printed into takes or the exported WAV.
+- Per-track monitor volume fader and pan knob: they change what monitoring
+  and take playback sound like, but they are not printed into takes or the
+exported WAV. Drag the knob up or down to pan, double-click it to centre.
 - Live spectrum analyzer behind the Equalizer curve, fed by the monitored
   signal and updated while you play.
 - Live voice trace on the compressor transfer curve: the recent input level
   rides the curve with a crosshair and an input/output readout, fed by the dry
   monitored signal.
+- Named markers: add one at the playhead with the Marker button or `M`, click
+  a flag to jump to it, right-click it to delete it. Markers are saved with the
+  project and never affect the audio.
+- Optional one-bar count-in: a bar of clicks leads into recording, whether or
+  not the metronome stays on during the take. The count-in is never recorded.
 - Records the computer's own output onto a dedicated stereo track by sharing a
   tab or window with its audio.
 - Live scrolling waveform and per-track meters while recording.

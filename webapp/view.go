@@ -10,15 +10,16 @@ import (
 // webState is the browser view of a session. It is flat and camelCase so the
 // JavaScript layer can render it without translating field names.
 type webState struct {
-	Root          string     `json:"root"`
-	Name          string     `json:"name"`
-	SampleRate    int        `json:"sampleRate"`
-	CreatedAt     string     `json:"createdAt"`
-	LatencyOffset int        `json:"latencyOffset"`
-	AnySolo       bool       `json:"anySolo"`
-	Click         webClick   `json:"click"`
-	Tracks        []webTrack `json:"tracks"`
-	Takes         []webTake  `json:"takes"`
+	Root          string      `json:"root"`
+	Name          string      `json:"name"`
+	SampleRate    int         `json:"sampleRate"`
+	CreatedAt     string      `json:"createdAt"`
+	LatencyOffset int         `json:"latencyOffset"`
+	AnySolo       bool        `json:"anySolo"`
+	Click         webClick    `json:"click"`
+	Tracks        []webTrack  `json:"tracks"`
+	Takes         []webTake   `json:"takes"`
+	Markers       []webMarker `json:"markers"`
 }
 
 // webClick is the metronome settings in browser shape.
@@ -27,6 +28,13 @@ type webClick struct {
 	BPM         float64 `json:"bpm"`
 	BeatsPerBar int     `json:"beatsPerBar"`
 	CountInBars int     `json:"countInBars"`
+}
+
+// webMarker is one named timeline position in browser shape.
+type webMarker struct {
+	ID    string `json:"id"`
+	Frame int    `json:"frame"`
+	Name  string `json:"name"`
 }
 
 // webTrack is one track in browser shape.
@@ -39,6 +47,7 @@ type webTrack struct {
 	Muted        bool        `json:"muted"`
 	Soloed       bool        `json:"soloed"`
 	VolumeDB     float64     `json:"volumeDb"`
+	Pan          float64     `json:"pan"`
 	PrintEffects bool        `json:"printEffects"`
 	ActiveTakeID string      `json:"activeTakeId"`
 	Effects      mix.Effects `json:"effects"`
@@ -93,6 +102,8 @@ type request struct {
 	Project     string       `json:"project"`
 	TrackID     string       `json:"trackId"`
 	TakeID      string       `json:"takeId"`
+	MarkerID    string       `json:"markerId"`
+	Frame       int          `json:"frame"`
 	Source      string       `json:"source"`
 	Channel     int          `json:"channel"`
 	Armed       bool         `json:"armed"`
@@ -106,6 +117,7 @@ type request struct {
 	Latency     int          `json:"latency"`
 	GainDB      float64      `json:"gainDb"`
 	VolumeDB    float64      `json:"volumeDb"`
+	Pan         float64      `json:"pan"`
 	StartFrame  int          `json:"startFrame"`
 	EndFrame    int          `json:"endFrame"`
 	Frames      int          `json:"frames"`
@@ -135,12 +147,20 @@ func newWebState(root string, current *session.Session) *webState {
 		Click:         newWebClick(state.Click),
 		Tracks:        make([]webTrack, 0, len(state.Tracks)),
 		Takes:         make([]webTake, 0, len(state.Takes)),
+		Markers:       make([]webMarker, 0, len(state.Markers)),
 	}
 	for _, track := range state.Tracks {
 		view.Tracks = append(view.Tracks, newWebTrack(track))
 	}
 	for _, take := range state.Takes {
 		view.Takes = append(view.Takes, newWebTake(take))
+	}
+	for _, marker := range state.Markers {
+		view.Markers = append(view.Markers, webMarker{
+			ID:    marker.ID.String(),
+			Frame: marker.Frame,
+			Name:  marker.Name,
+		})
 	}
 	return view
 }
@@ -168,6 +188,7 @@ func newWebTrack(track session.TrackState) webTrack {
 		Muted:        track.Muted,
 		Soloed:       track.Soloed,
 		VolumeDB:     track.VolumeDB,
+		Pan:          track.Pan,
 		PrintEffects: track.PrintEffects,
 		ActiveTakeID: track.ActiveTakeID.String(),
 		Effects:      track.Effects,

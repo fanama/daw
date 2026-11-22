@@ -308,6 +308,50 @@ button.mini {
   font-variant-numeric: tabular-nums;
 }
 
+.track-pan {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.pan-knob {
+  --pan-angle: 0deg;
+  position: relative;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid #2f394b;
+  background: radial-gradient(circle at 50% 32%, #232c3b 0%, #141a24 70%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.45);
+  cursor: ns-resize;
+  touch-action: none;
+}
+.pan-knob i {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 1px;
+  height: 8px;
+  margin-left: -0.5px;
+  border-radius: 1px;
+  background: var(--accent);
+  transform: rotate(var(--pan-angle));
+  transform-origin: 50% 9px;
+  transition: transform 40ms linear;
+}
+.pan-knob.dragging i { transition: none; }
+.pan-knob:hover { border-color: #3b475c; }
+.pan-knob.dragging { border-color: var(--accent-dim); }
+.pan-knob:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.track-pan .pan-value {
+  min-width: 34px;
+  font-variant-numeric: tabular-nums;
+}
+
 .hint {
   color: var(--muted);
   font-size: 12px;

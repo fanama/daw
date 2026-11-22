@@ -32,6 +32,10 @@ function trackLevel(track) {
   return Math.pow(10, (Number(track.volumeDb) || 0) / 20);
 }
 
+function trackPan(track) {
+  return Math.max(-1, Math.min(1, Number(track.pan) || 0));
+}
+
 export class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -204,9 +208,12 @@ export class AudioEngine {
         const inputAnalyser = this.ctx.createAnalyser();
         inputAnalyser.fftSize = 2048;
         const gain = this.ctx.createGain();
+        const panner = this.ctx.createStereoPanner();
+        panner.pan.value = trackPan(track);
         built.output.connect(analyser);
         analyser.connect(gain);
-        gain.connect(this.monitor);
+        gain.connect(panner);
+        panner.connect(this.monitor);
         this.splitter.connect(built.input, Math.min(track.channel, 1));
         this.splitter.connect(inputAnalyser, Math.min(track.channel, 1));
         chain = {
@@ -214,13 +221,14 @@ export class AudioEngine {
           analyser,
           inputAnalyser,
           gain,
+          panner,
           signature,
           meterBuffer: new Float32Array(analyser.fftSize),
           inputBuffer: new Float32Array(inputAnalyser.fftSize),
           spectrumBuffer: new Float32Array(analyser.frequencyBinCount),
           dispose() {
             built.dispose();
-            for (const node of [analyser, inputAnalyser, gain]) {
+            for (const node of [analyser, inputAnalyser, gain, panner]) {
               try {
                 node.disconnect();
               } catch (error) {
@@ -232,6 +240,7 @@ export class AudioEngine {
         this.chains.set(track.id, chain);
       }
       chain.gain.gain.value = track.armed && !track.muted ? trackLevel(track) : 0;
+      chain.panner.pan.setTargetAtTime(trackPan(track), this.ctx.currentTime, 0.015);
     }
   }
 
@@ -245,6 +254,8 @@ export class AudioEngine {
       const volume = this.playbackVolumes.get(track.id);
       if (volume) volume.gain.setTargetAtTime(trackLevel(track), now, 0.015);
       if (this.playbackChains.has(track.id)) this.playbackChain(track);
+      const chain = this.playbackChains.get(track.id);
+      if (chain) chain.panner.pan.setTargetAtTime(trackPan(track), now, 0.015);
     }
     for (const [id, chain] of this.playbackChains) {
       if (tracks.has(id)) continue;
@@ -264,12 +275,23 @@ export class AudioEngine {
     const current = this.playbackChains.get(track.id);
     if (current && current.signature === signature) return current;
     const built = buildEffectsChain(this.ctx, track.effects);
-    built.output.connect(this.master);
+    const panner = this.ctx.createStereoPanner();
+    panner.pan.value = trackPan(track);
+    built.output.connect(panner);
+    panner.connect(this.master);
     const volume = this.trackVolume(track);
     volume.disconnect();
     volume.connect(built.input);
     if (current) current.dispose();
-    const chain = { ...built, signature };
+    const chain = {
+      ...built,
+      signature,
+      panner,
+      dispose() {
+        built.dispose();
+        panner.disconnect();
+      },
+    };
     this.playbackChains.set(track.id, chain);
     return chain;
   }
@@ -393,7 +415,7 @@ export class AudioEngine {
 
   schedulePlayback(state, pcm, fromFrame, when) {
     const rate = this.ctx.sampleRate;
-    for (const { take } of audibleTakes(state)) {
+    for (const { track, take } of audibleTakes(state)) {
       const audio = pcm.get(take.file);
       if (!audio) continue;
       const buffer = this.buffer(take.file, audio);
@@ -564,6 +586,26 @@ export class AudioEngine {
   setClick(click) {
     this.click = click;
     if (this.playing) this.startClick();
+  }
+
+  // countIn plays a metronome lead-in before recording starts. It is audible
+  // even when the click is switched off, because a count-in must be heard.
+  async countIn({ bpm = 120, beatsPerBar = 4, bars = 1, onBeat = null } = {}) {
+    await this.ensureContext(this.sessionRate);
+    const meter = Math.max(2, beatsPerBar || 4);
+    const beats = Math.max(1, bars) * meter;
+    const beatSeconds = 60 / Math.min(300, Math.max(20, bpm || 120));
+    const start = this.ctx.currentTime + 0.08;
+    for (let beat = 0; beat < beats; beat++) {
+      const when = start + beat * beatSeconds;
+      this.clickAt(when, beat % meter === 0);
+      if (onBeat) {
+        const delay = Math.max(0, (when - this.ctx.currentTime) * 1000);
+        window.setTimeout(() => onBeat(beats - beat), delay);
+      }
+    }
+    const remaining = Math.max(0, (start + beats * beatSeconds - this.ctx.currentTime) * 1000);
+    await new Promise((resolve) => window.setTimeout(resolve, remaining + 40));
   }
 
   startClick() {

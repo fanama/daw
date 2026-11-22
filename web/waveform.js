@@ -121,6 +121,33 @@ function livesOf(live) {
   return Array.isArray(live) ? live : [live];
 }
 
+function drawMarkers(context, markers, width, height) {
+  for (const marker of markers) {
+    if (marker.x < 0 || marker.x > width) continue;
+    context.strokeStyle = "rgba(216, 179, 106, 0.5)";
+    context.setLineDash([3, 5]);
+    context.beginPath();
+    context.moveTo(marker.x, 6);
+    context.lineTo(marker.x, height);
+    context.stroke();
+    context.setLineDash([]);
+    context.fillStyle = "#d8b36a";
+    context.beginPath();
+    context.moveTo(marker.x - 4, 0);
+    context.lineTo(marker.x + 4, 0);
+    context.lineTo(marker.x, 6);
+    context.closePath();
+    context.fill();
+    context.font = "10px sans-serif";
+    context.textBaseline = "middle";
+    const labelWidth = context.measureText(marker.name).width;
+    context.fillStyle = "#2a2417";
+    context.fillRect(marker.x, 8, labelWidth + 8, 12);
+    context.fillStyle = "#d8b36a";
+    context.fillText(marker.name, marker.x + 4, 14);
+  }
+}
+
 export function drawTimeline(canvas, view) {
   const width = canvas.clientWidth || 900;
   const height = canvas.clientHeight || 360;
@@ -135,9 +162,12 @@ export function drawTimeline(canvas, view) {
   const state = view.state;
   const lives = livesOf(view.live);
   const liveEnd = lives.reduce((end, live) => Math.max(end, live.startFrame + live.blockFrames * (live.peaks.length / 2)), 0);
-  const seconds = Math.max(15, contentEndFrame(state, liveEnd) / state.sampleRate + 2);
+  const markers = Array.isArray(state.markers) ? state.markers : [];
+  const markerEnd = markers.reduce((end, marker) => Math.max(end, marker.frame), 0);
+  const seconds = Math.max(15, Math.max(contentEndFrame(state, liveEnd), markerEnd) / state.sampleRate + 2);
   const layout = { pxPerFrame: width / (seconds * state.sampleRate), seconds, laneHeight: 0 };
   canvas.layout = layout;
+  canvas.markerHits = markers.map((marker) => ({ ...marker, x: marker.frame * layout.pxPerFrame }));
   drawRuler(context, width, seconds, state.sampleRate);
   const lanes = state.tracks.length;
   if (lanes === 0) {
@@ -164,6 +194,7 @@ export function drawTimeline(canvas, view) {
       if (live.trackId === track.id) drawLive(context, live, y, layout.laneHeight, layout);
     }
   });
+  drawMarkers(context, canvas.markerHits, width, height);
   const playheadX = view.frame * layout.pxPerFrame;
   context.strokeStyle = "#f2555a";
   context.lineWidth = 1.5;
@@ -176,6 +207,17 @@ export function drawTimeline(canvas, view) {
 export function frameAtX(canvas, x) {
   if (!canvas.layout) return 0;
   return Math.max(0, Math.round(x / canvas.layout.pxPerFrame));
+}
+
+// markerAtX returns the marker whose flag is close enough to click, if any.
+export function markerAtX(canvas, x) {
+  let nearest = null;
+  for (const marker of canvas.markerHits || []) {
+    const distance = Math.abs(marker.x - x);
+    if (distance > 8) continue;
+    if (!nearest || distance < nearest.distance) nearest = { ...marker, distance };
+  }
+  return nearest;
 }
 
 export { RULER_HEIGHT };

@@ -22,7 +22,13 @@ func TestEncodeStateRoundTripsTheProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add take: %v", err)
 	}
+	if err := current.SetPan(track.ID(), -0.4); err != nil {
+		t.Fatalf("pan: %v", err)
+	}
 	current.SetClick(mix.Click{Enabled: true, BPM: 90, BeatsPerBar: 3, CountInBars: 1})
+	if _, err := current.AddMarker(480, "Verse"); err != nil {
+		t.Fatalf("add marker: %v", err)
+	}
 	if err := current.SetTakeGain(take.ID(), 3.5); err != nil {
 		t.Fatalf("gain: %v", err)
 	}
@@ -51,7 +57,14 @@ func TestEncodeStateRoundTripsTheProject(t *testing.T) {
 	if len(tracks) != 1 || len(takes) != 1 {
 		t.Fatalf("expected one track and one take, got %d/%d", len(tracks), len(takes))
 	}
+	if tracks[0].Pan() != -0.4 {
+		t.Fatalf("unexpected pan: %v", tracks[0].Pan())
+	}
 	if takes[0].GainDB() != 3.5 || takes[0].Trim().StartFrame != 10 || takes[0].StartFrame() != 120 {
 		t.Fatalf("unexpected take: %+v", takes[0])
+	}
+	markers := restored.Markers()
+	if len(markers) != 1 || markers[0].Name() != "Verse" || markers[0].Frame() != 480 {
+		t.Fatalf("unexpected markers: %+v", markers)
 	}
 }

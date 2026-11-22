@@ -20,6 +20,7 @@
         <label class="switch"><input type="checkbox" id="click-enabled"> click</label>
         <input type="number" id="click-bpm" class="bpm" min="20" max="300" step="1" value="120" aria-label="Tempo">
         <span class="unit">BPM</span>
+        <label class="switch" title="One bar of clicks before recording"><input type="checkbox" id="count-in"> count-in</label>
         <label class="switch"><input type="checkbox" id="monitor-enabled" checked> monitor</label>
         <label class="switch volume" title="Output volume">
           <span class="unit">vol</span>
@@ -29,6 +30,7 @@
       </div>
       <div class="actions">
         <span id="tuner" class="tuner" title="Tuner">—</span>
+        <button id="btn-marker" class="ghost" title="Add a marker at the playhead (M)">Marker</button>
         <button id="btn-export" class="ghost">Export WAV</button>
         <button id="btn-sessions" class="ghost">Sessions</button>
       </div>

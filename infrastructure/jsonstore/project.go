@@ -35,6 +35,7 @@ type sessionJSON struct {
 	RecordLatencyOffset int       `json:"recordLatencyOffset"`
 	NextTrack           int       `json:"nextTrack"`
 	NextTake            int       `json:"nextTake"`
+	NextMarker          int       `json:"nextMarker"`
 }
 
 type sourceJSON struct {
@@ -51,6 +52,7 @@ type trackJSON struct {
 	Mute         bool        `json:"mute"`
 	Solo         bool        `json:"solo"`
 	VolumeDB     float64     `json:"volumeDb"`
+	Pan          float64     `json:"pan"`
 	PrintEffects bool        `json:"printEffects"`
 	Effects      effectsJSON `json:"effects"`
 	ActiveTakeID string      `json:"activeTakeId"`
@@ -79,11 +81,12 @@ type takeJSON struct {
 }
 
 type projectJSON struct {
-	SchemaVersion int         `json:"schemaVersion"`
-	App           appJSON     `json:"app"`
-	Session       sessionJSON `json:"session"`
-	Tracks        []trackJSON `json:"tracks"`
-	Takes         []takeJSON  `json:"takes"`
+	SchemaVersion int          `json:"schemaVersion"`
+	App           appJSON      `json:"app"`
+	Session       sessionJSON  `json:"session"`
+	Tracks        []trackJSON  `json:"tracks"`
+	Takes         []takeJSON   `json:"takes"`
+	Markers       []markerJSON `json:"markers"`
 }
 
 func projectFromState(state session.State) projectJSON {
@@ -93,6 +96,7 @@ func projectFromState(state session.State) projectJSON {
 		Session:       sessionFromState(state),
 		Tracks:        tracksFromState(state.Tracks),
 		Takes:         takesFromState(state.Takes),
+		Markers:       markersFromState(state.Markers),
 	}
 }
 
@@ -105,6 +109,7 @@ func sessionFromState(state session.State) sessionJSON {
 		RecordLatencyOffset: state.LatencyOffset,
 		NextTrack:           state.NextTrack,
 		NextTake:            state.NextTake,
+		NextMarker:          state.NextMarker,
 	}
 }
 
@@ -126,6 +131,7 @@ func trackFromState(track session.TrackState) trackJSON {
 		Mute:         track.Muted,
 		Solo:         track.Soloed,
 		VolumeDB:     track.VolumeDB,
+		Pan:          track.Pan,
 		PrintEffects: track.PrintEffects,
 		Effects:      effectsFromDomain(track.Effects),
 		ActiveTakeID: track.ActiveTakeID.String(),
@@ -169,10 +175,12 @@ func stateFromProject(project projectJSON) (session.State, error) {
 		SampleRate:    project.Session.SampleRate,
 		Tracks:        tracksToState(project.Tracks),
 		Takes:         takesToState(project.Takes),
+		Markers:       markersToState(project.Markers),
 		Click:         clickToDomain(project.Session.Click),
 		LatencyOffset: project.Session.RecordLatencyOffset,
 		NextTrack:     project.Session.NextTrack,
 		NextTake:      project.Session.NextTake,
+		NextMarker:    project.Session.NextMarker,
 	}, nil
 }
 
@@ -192,6 +200,7 @@ func tracksToState(tracks []trackJSON) []session.TrackState {
 			Muted:        track.Mute,
 			Soloed:       track.Solo,
 			VolumeDB:     track.VolumeDB,
+			Pan:          track.Pan,
 			PrintEffects: track.PrintEffects,
 			Effects:      effectsToDomain(track.Effects),
 			ActiveTakeID: session.TakeID(track.ActiveTakeID),

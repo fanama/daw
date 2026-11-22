@@ -80,6 +80,17 @@ func (s *Service) SetTrackVolume(id session.TrackID, volumeDB float64) error {
 	return s.Save()
 }
 
+// SetTrackPan places a track in the stereo field from -1 to 1.
+func (s *Service) SetTrackPan(id session.TrackID, pan float64) error {
+	if err := s.requireSession(); err != nil {
+		return err
+	}
+	if err := s.current.SetPan(id, pan); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
 // SetSource changes where a track records from.
 func (s *Service) SetSource(id session.TrackID, source session.Source) error {
 	if err := s.requireSession(); err != nil {

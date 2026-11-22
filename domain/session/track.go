@@ -17,6 +17,7 @@ type Track struct {
 	muted        bool
 	soloed       bool
 	volumeDB     float64
+	pan          float64
 	printEffects bool
 	effects      mix.Effects
 	activeTakeID TakeID
@@ -77,6 +78,9 @@ func (t Track) IsSoloed() bool { return t.soloed }
 // VolumeDB returns the monitor fader level in decibels.
 func (t Track) VolumeDB() float64 { return t.volumeDB }
 
+// Pan returns the monitor position from -1 (left) to 1 (right).
+func (t Track) Pan() float64 { return t.pan }
+
 // PrintsEffects reports whether the take is written with effects baked in.
 func (t Track) PrintsEffects() bool { return t.printEffects }
 
@@ -104,6 +108,7 @@ func (t Track) state() TrackState {
 		Muted:        t.muted,
 		Soloed:       t.soloed,
 		VolumeDB:     t.volumeDB,
+		Pan:          t.pan,
 		PrintEffects: t.printEffects,
 		Effects:      t.effects,
 		ActiveTakeID: t.activeTakeID,
@@ -123,6 +128,7 @@ func trackFromState(state TrackState) (Track, error) {
 	track.muted = state.Muted
 	track.soloed = state.Soloed
 	track.volumeDB = clampVolumeDB(state.VolumeDB)
+	track.pan = clampPan(state.Pan)
 	track.printEffects = state.PrintEffects && track.source.IsInput()
 	track.effects = state.Effects.Normalize()
 	track.activeTakeID = state.ActiveTakeID
@@ -140,6 +146,19 @@ func clampVolumeDB(value float64) float64 {
 		return 0
 	}
 	return math.Max(MinTrackVolumeDB, math.Min(MaxTrackVolumeDB, value))
+}
+
+// Track pan is a monitor control too: -1 is hard left, 1 hard right.
+const (
+	MinTrackPan = -1.0
+	MaxTrackPan = 1.0
+)
+
+func clampPan(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	return math.Max(MinTrackPan, math.Min(MaxTrackPan, value))
 }
 
 func validateInputChannel(channel int) error {

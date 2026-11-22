@@ -86,6 +86,19 @@ func (s *Session) SetVolume(id TrackID, volumeDB float64) error {
 	return nil
 }
 
+// SetPan places a track in the stereo field from -1 (left) to 1 (right).
+func (s *Session) SetPan(id TrackID, pan float64) error {
+	index, err := s.trackIndex(id)
+	if err != nil {
+		return err
+	}
+	if math.IsNaN(pan) || math.IsInf(pan, 0) {
+		return invalid("track pan must be finite")
+	}
+	s.tracks[index].pan = clampPan(pan)
+	return nil
+}
+
 // SetSource changes where a track records from.
 func (s *Session) SetSource(id TrackID, source Source) error {
 	index, err := s.trackIndex(id)
