@@ -1,0 +1,12 @@
+{
+  "name": "gorecord",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static browser build of gorecord",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "build": "node scripts/build-site.mjs"
+  }
+}

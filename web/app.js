@@ -38,8 +38,11 @@ const OUTPUT_KEY = "gorecord.masterOutputs";
 
 // Keep a connection open for the launcher. Closing the window closes it and
 // lets the Go server stop; reloads reconnect within the shutdown grace period.
-const appLive = new EventSource("/__gorecord/events");
-appLive.onerror = () => {};
+// Static builds opened without this marker have no live endpoint to poll.
+const appLive = new URLSearchParams(window.location.search).has("desktop")
+  ? new EventSource("/__gorecord/events")
+  : null;
+if (appLive) appLive.onerror = () => {};
 
 const EFFECT_BLOCKS = [
   ["Amp", "Amp", [["Drive", "Drive", 0, 1, 0.01], ["Level", "LevelDB", -24, 6, 0.5], ["Bass", "BassDB", -12, 12, 0.5], ["Mid", "MidDB", -12, 12, 0.5], ["Treble", "TrebleDB", -12, 12, 0.5]]],

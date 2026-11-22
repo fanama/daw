@@ -2,8 +2,9 @@ APP := gorecord
 BIN := bin/$(APP)
 ADDR ?= 127.0.0.1:8080
 BUNDLE := dist/$(APP).app
+SITE := dist-site
 
-.PHONY: build bundle run test vet fmt caps clean web serve
+.PHONY: build bundle run test vet fmt caps clean web serve site
 
 build: web
 	go build -o $(BIN) ./cmd/gorecord
@@ -39,5 +40,8 @@ web:
 serve: web
 	go run ./cmd/gorecord -window=none -addr $(ADDR)
 
+site:
+	node scripts/build-site.mjs
+
 clean:
-	rm -rf bin dist web/gorecord.wasm web/wasm_exec.js
+	rm -rf bin dist $(SITE) web/gorecord.wasm web/wasm_exec.js

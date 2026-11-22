@@ -76,6 +76,8 @@ exported WAV. Drag the knob up or down to pan, double-click it to centre.
 ## Requirements
 
 - Go 1.25+.
+- Node.js 20.19+ to build the static site for Freebuff Sites. The desktop app
+  itself does not need Node.
 - macOS 12+ to build the `.app` bundle. The bundle still needs Chromium.
 - Chrome, Edge, Chromium or Brave for the desktop app window. Without one, the
   app opens in your default browser instead.
@@ -91,6 +93,7 @@ make build      # web build + bin/gorecord
 make bundle     # macOS bundle in dist/gorecord.app
 make run        # builds, serves on 127.0.0.1:8080, opens the app window
 make serve      # builds and serves without opening a window
+make site       # static browser build in dist-site/ for Freebuff Sites
 make test
 make vet
 make caps       # 300-line file / 40-line function check
@@ -123,6 +126,37 @@ bin/gorecord -browser "/Applications/Google Chrome.app/Contents/MacOS/Google Chr
 binary. The launcher stops about two seconds after its window or tab closes,
 even if Chromium keeps running in the background. A reload sends a fresh page
 signal and keeps the server alive. Ctrl+C still works from a terminal.
+
+## Deploy on Freebuff Sites
+
+The browser build is static. `cmd/gorecord` is only the local launcher, so a
+Freebuff deployment contains the Go core compiled to WebAssembly plus the files
+in `web/`; the Go server is not deployed.
+
+```bash
+make site   # writes dist-site/
+```
+
+`package.json` exposes `npm run build`, which runs `scripts/build-site.mjs` and
+produces `dist-site/`; `wrangler.jsonc` publishes that folder as static assets.
+The publishing workspace needs Go 1.25+ and Node.js 20.19+. If the publish log
+reports `site build: cannot run Go`, install Go 1.25+ in that workspace and
+publish again. To check the built site locally:
+
+```bash
+python3 -m http.server 8080 -d dist-site
+```
+
+Push the repository to GitHub, connect it to a Freebuff project, then use
+Publish for Preview and Production. No database, secrets or server-side storage
+are needed.
+Freebuff serves the site over HTTPS, which the microphone and display-capture
+APIs require. Open the published page in a normal browser tab rather than an
+embedded preview.
+
+Projects and takes stay in the browser's IndexedDB for that site's origin. They
+are separate from the desktop launcher's profile, and clearing site data deletes
+them. The first load downloads the WASM core; no audio leaves the browser.
 
 ## macOS app bundle
 
@@ -206,6 +240,9 @@ audible mix; mute, solo, active takes, take gain and trim are already applied.
 - No comping, MIDI, plugin hosting or time-stretch.
 - Reverb and amp are musically simple by design (no IR cabinet, no neural
   models).
+- The Freebuff deployment is a static site: no server-side project storage,
+  accounts, collaboration or background processing. It needs Go in the build
+  workspace because the WASM core is compiled at publish time.
 
 ## License
 

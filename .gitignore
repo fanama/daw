@@ -1,4 +1,8 @@
 bin/
+dist-site/
+freebuff-sites-build/
+node_modules/
+.wrangler/
 web/gorecord.wasm
 web/wasm_exec.js
 *.app

@@ -72,6 +72,11 @@ func waitForExit(done, quit <-chan struct{}) {
 }
 
 func openWindow(mode, url, browserPath string) <-chan struct{} {
+	if mode != "none" {
+		// The page keeps an SSE connection open only for this launcher. A static
+		// deployment has no such endpoint and must not retry it.
+		url += "?desktop=1"
+	}
 	switch mode {
 	case "none":
 		return nil
