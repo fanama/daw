@@ -38,7 +38,7 @@ func TestSystemAudioArmsAloneAndPlansStereo(t *testing.T) {
 	}
 }
 
-func TestSystemAudioCannotArmWithInputs(t *testing.T) {
+func TestSystemAudioArmsWithInputs(t *testing.T) {
 	s := newSession(t)
 	guitar := addTrack(t, s, "Guitar", 0)
 	pc := addSystemTrack(t, s, "Browser")
@@ -46,17 +46,31 @@ func TestSystemAudioCannotArmWithInputs(t *testing.T) {
 	if err := s.SetArm(guitar.ID(), true); err != nil {
 		t.Fatalf("arm guitar: %v", err)
 	}
-	if err := s.SetArm(pc.ID(), true); !session.IsCode(err, session.CodeConflict) {
-		t.Fatalf("expected conflict arming PC audio over inputs, got %v", err)
-	}
-	if err := s.SetArm(guitar.ID(), false); err != nil {
-		t.Fatalf("disarm guitar: %v", err)
-	}
 	if err := s.SetArm(pc.ID(), true); err != nil {
 		t.Fatalf("arm PC audio: %v", err)
 	}
-	if err := s.SetArm(guitar.ID(), true); !session.IsCode(err, session.CodeConflict) {
-		t.Fatalf("expected conflict arming inputs over PC audio, got %v", err)
+	plan, err := s.ArmPlan()
+	if err != nil {
+		t.Fatalf("arm plan: %v", err)
+	}
+	if len(plan) != 2 || plan[0].Source.IsSystem() || !plan[1].Source.IsSystem() {
+		t.Fatalf("expected input then PC audio, got %+v", plan)
+	}
+	if s.ArmedChannelCount() != 3 {
+		t.Fatalf("expected mono input plus stereo PC audio, got %d channels", s.ArmedChannelCount())
+	}
+}
+
+func TestOnlyOneSystemAudioTrackCanBeArmed(t *testing.T) {
+	s := newSession(t)
+	first := addSystemTrack(t, s, "Browser")
+	second := addSystemTrack(t, s, "Player")
+
+	if err := s.SetArm(first.ID(), true); err != nil {
+		t.Fatalf("arm first PC track: %v", err)
+	}
+	if err := s.SetArm(second.ID(), true); !session.IsCode(err, session.CodeConflict) {
+		t.Fatalf("expected conflict for a second PC track, got %v", err)
 	}
 }
 
@@ -69,7 +83,7 @@ func TestSystemAudioTakesAreAlwaysDry(t *testing.T) {
 	}
 }
 
-func TestRestoreRejectsSystemAndInputArmedTogether(t *testing.T) {
+func TestRestoreKeepsSystemAndInputArmedTogether(t *testing.T) {
 	state := session.State{
 		Name:       "PC idea",
 		SampleRate: 48000,
@@ -79,8 +93,13 @@ func TestRestoreRejectsSystemAndInputArmedTogether(t *testing.T) {
 			{ID: "trk_2", Name: "Browser", InputChannel: -1, Source: session.SystemSource(), Armed: true},
 		},
 	}
-	if _, err := session.Restore(state); !session.IsCode(err, session.CodeConflict) {
-		t.Fatalf("expected conflict, got %v", err)
+	restored, err := session.Restore(state)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	tracks := restored.Tracks()
+	if len(tracks) != 2 || !tracks[0].IsArmed() || !tracks[1].IsArmed() {
+		t.Fatalf("mixed arming was not restored: %+v", tracks)
 	}
 }
 

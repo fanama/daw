@@ -356,8 +356,9 @@ All UI updates from goroutines go through `fyne.Do` (Fyne 2.6+ requirement); dir
 Recording and monitoring share **one device clock**. Concretely:
 
 - Capture and playback are opened as one **duplex** device on the same interface whenever the user selects the same device for both.
-- If the user selects a different playback device from the capture device, the two clocks drift and can also have unrelated latencies. v1 then **disables live monitoring** and allows only playback of existing takes; the UI explains why. Supporting independent devices requires drift compensation (resampling the runaway side), which is explicitly deferred.
-- The record path never resamples.
+- If the user selects a different playback device from the capture device, the two clocks drift and can also have unrelated latencies. The native v1 then **disables live monitoring** and allows only playback of existing takes; the UI explains why.
+- The shipping browser build records PC audio and interface inputs in the same pass, with one capture worklet per source family. A Chromium `MediaStreamTrackProcessor` probe estimates each source's frame rate, and the take is resampled to the session rate before storage. This correction is best-effort; when the probe is unavailable, the take is only brought to the session rate.
+- The native record path never resamples; the browser path resamples only at the end of a take.
 
 ### 8.5 Timeline and mixing
 
@@ -565,7 +566,7 @@ All effects are per-track, run in the audio callback, allocation-free after cons
 | R4 | macOS notarization needs a paid Apple Developer account | Medium — G7 installability | Confirm account availability; otherwise ship unsigned with clear quarantine instructions (documented gap, not hidden). |
 | R5 | WASAPI-only means no ASIO/high-end interfaces on Windows | Medium | State limitation prominently; shared-mode WASAPI generally works for USB interfaces; log device list in issue template. |
 | R6 | 32-bit float multichannel files read inconsistently by some tools | Low–Medium | Use `WAVE_FORMAT_EXTENSIBLE` + channel mask; verify in Audacity, Reaper, ffmpeg, Logic in the manual checklist. |
-| R7 | Separate capture/playback devices drift | Medium | §8.4 rule: one clock or no live monitoring; UI explains. |
+| R7 | Separate capture/playback devices drift | Medium | Native: §8.4 one clock or no live monitoring; UI explains. Browser: per-source clock probe and end-of-take resampling, best effort. |
 | R8 | Four supported effects + tuner is a large v1 | High — schedule | Milestones (§15) sequence EQ→comp→drive/cab→reverb→tuner; tuner can land last. |
 | R9 | Linux backend variance (PipeWire/Pulse/ALSA/JACK) | Medium | PulseAudio default, ALSA fallback, JACK documented experimental, capture a device-list diagnostic in the app's Help. |
 | R10 | Disk write stalls during recording | High — data loss | Large writer ring, continuous append, stall counters, 95 % cap guard, repair pass. |

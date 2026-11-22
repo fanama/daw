@@ -2,9 +2,11 @@ package sessionapp_test
 
 import (
 	"testing"
+
+	"gorecord/domain/session"
 )
 
-func TestBeginTrackTakesCreatesOneTakePerArmedInput(t *testing.T) {
+func TestBeginTrackTakesCreatesOneTakePerSource(t *testing.T) {
 	service := newService(t)
 	if err := service.Create("Two inputs", 48000); err != nil {
 		t.Fatalf("create: %v", err)
@@ -60,5 +62,39 @@ func TestBeginTrackTakesCreatesOneTakePerArmedInput(t *testing.T) {
 		if track.ActiveTakeID().IsZero() {
 			t.Fatalf("track %s has no active take", track.ID())
 		}
+	}
+}
+
+func TestBeginTrackTakesCapturesPCAndInputTogether(t *testing.T) {
+	service := newService(t)
+	if err := service.Create("Backing plus voice", 48000); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	input := service.Current().Tracks()[0]
+	pc, err := service.AddTrackWithSource("PC", session.SystemSource())
+	if err != nil {
+		t.Fatalf("add PC track: %v", err)
+	}
+	if err := service.SetArm(input.ID(), true); err != nil {
+		t.Fatalf("arm input: %v", err)
+	}
+	if err := service.SetArm(pc.ID(), true); err != nil {
+		t.Fatalf("arm PC: %v", err)
+	}
+	if _, _, err := service.BeginTake(0); err == nil {
+		t.Fatal("the legacy single-take path must refuse mixed sources")
+	}
+	takes, plan, err := service.BeginTrackTakes(2400)
+	if err != nil {
+		t.Fatalf("begin takes: %v", err)
+	}
+	if len(takes) != 2 || len(plan) != 2 {
+		t.Fatalf("expected two takes and slots, got %d / %d", len(takes), len(plan))
+	}
+	if takes[0].Channels() != 1 || takes[1].Channels() != 2 {
+		t.Fatalf("expected mono input then stereo PC, got %d / %d", takes[0].Channels(), takes[1].Channels())
+	}
+	if takes[0].File() != "takes/take-001.wav" || takes[1].File() != "takes/take-002.wav" {
+		t.Fatalf("unexpected take files: %s / %s", takes[0].File(), takes[1].File())
 	}
 }

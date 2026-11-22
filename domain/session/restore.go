@@ -89,8 +89,5 @@ func (s *Session) validateArming() error {
 		}
 		armedChannels[track.source.Channel] = track.id
 	}
-	if !systemArmed.IsZero() && len(armedChannels) > 0 {
-		return conflict("PC audio cannot be armed together with interface inputs")
-	}
 	return nil
 }

@@ -22,6 +22,20 @@
         <span class="unit">BPM</span>
         <label class="switch" title="One bar of clicks before recording"><input type="checkbox" id="count-in"> count-in</label>
         <label class="switch"><input type="checkbox" id="monitor-enabled" checked> monitor</label>
+        <details id="master-output" class="output-menu">
+          <summary title="Choose master output devices">
+            <span class="unit">out</span>
+            <span id="output-label">Default</span>
+          </summary>
+          <div class="output-panel">
+            <div class="output-head">
+              <strong>Master outputs</strong>
+              <button id="btn-output-rescan" class="mini" type="button" title="Rescan output devices">↻</button>
+            </div>
+            <div id="output-list" class="output-list"></div>
+            <p id="output-hint" class="output-hint">Select one or more outputs. The first is the primary.</p>
+          </div>
+        </details>
         <label class="switch volume" title="Output volume">
           <span class="unit">vol</span>
           <input type="range" id="master-volume" min="0" max="100" step="1" value="100" aria-label="Output volume">
@@ -46,7 +60,7 @@
           </span>
         </div>
         <div id="track-list" class="track-list"></div>
-        <p class="hint">Arm <b>●</b> one or more tracks, then record: every armed input is captured at once into its own take.</p>
+        <p class="hint">Arm <b>●</b> to record; press <b>L</b> to listen without arming. PC and input tracks can be recorded or monitored together.</p>
       </aside>
 
       <section class="timeline">

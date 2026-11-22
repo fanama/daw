@@ -38,7 +38,8 @@ func (s *Session) RenameTrack(id TrackID, name string) error {
 	return nil
 }
 
-// SetArm arms or disarms a track, enforcing channel and source exclusivity.
+// SetArm arms or disarms a track, enforcing unique input channels and at most
+// one PC audio source per pass.
 func (s *Session) SetArm(id TrackID, armed bool) error {
 	index, err := s.trackIndex(id)
 	if err != nil {
@@ -177,20 +178,15 @@ func (s *Session) RemoveTrack(id TrackID) ([]Take, error) {
 
 func (s *Session) ensureArmable(index int) error {
 	candidate := s.tracks[index]
-	if candidate.source.IsSystem() {
-		for other := range s.tracks {
-			if other != index && s.tracks[other].armed {
-				return conflict("PC audio records as its own take; disarm the other tracks first")
-			}
-		}
-		return nil
-	}
 	for other := range s.tracks {
 		if other == index || !s.tracks[other].armed {
 			continue
 		}
-		if s.tracks[other].source.IsSystem() {
-			return conflict("disarm the PC audio track to record interface inputs")
+		if candidate.source.IsSystem() || s.tracks[other].source.IsSystem() {
+			if candidate.source.IsSystem() && s.tracks[other].source.IsSystem() {
+				return conflict("only one PC audio track can be armed")
+			}
+			continue
 		}
 		if s.tracks[other].source.Channel == candidate.source.Channel {
 			return conflict("input channel %d is already armed by %q", candidate.source.Channel, s.tracks[other].name)

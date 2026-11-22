@@ -37,13 +37,17 @@ packaging/macos/   Info.plist for the double-clickable app bundle
   selected device is captured together, and each track receives its own take.
 - Layer takes on a sample-accurate timeline; previous takes play back while you
   record, and each take stores its start frame.
-- Per-track monitor chain: drive + tone stack → cabinet filter → 3-band EQ →
-  compressor → reverb. The equalizer has five bands at 20 Hz, 100 Hz, 1 kHz,
-  6 kHz and 20 kHz. The chain is heard on live monitoring and on the playback
-  of recorded takes, but it is never printed into a take.
+- Per-track monitor chain for input tracks: drive + tone stack → cabinet
+  filter → 3-band EQ → compressor → reverb. The equalizer has five bands at
+  20 Hz, 100 Hz, 1 kHz, 6 kHz and 20 kHz. The chain is heard on live monitoring
+  and on the playback of recorded takes, but it is never printed into a take.
+  PC audio is monitored and played back dry.
 - Per-track monitor volume fader and pan knob: they change what monitoring
   and take playback sound like, but they are not printed into takes or the
 exported WAV. Drag the knob up or down to pan, double-click it to centre.
+- Master output routing: pick one or more playback devices. The first selected
+  output stays on the low-latency Web Audio destination; extra outputs play the
+  same mix in parallel. The choice is stored locally.
 - Live spectrum analyzer behind the Equalizer curve, fed by the monitored
   signal and updated while you play.
 - Live voice trace on the compressor transfer curve: the recent input level
@@ -56,6 +60,11 @@ exported WAV. Drag the knob up or down to pan, double-click it to centre.
   not the metronome stays on during the take. The count-in is never recorded.
 - Records the computer's own output onto a dedicated stereo track by sharing a
   tab or window with its audio.
+- Records PC audio and input tracks in the same pass. Each source family is
+  captured on its own clock, then re-aligned with the session clock before the
+  take is stored.
+- Listen to any combination of PC audio and input tracks at once with the
+  per-track **L** button, without arming them.
 - Live scrolling waveform and per-track meters while recording.
 - Chromatic tuner and an optional click, off by default and never recorded.
 - Non-destructive take gain, mute, trim and one-click normalize to a -1 dBFS
@@ -144,9 +153,19 @@ Create a session, arm the guitar track and press record. The app asks for
 microphone access once. Add a second input track and arm both to capture two
 interface channels in one pass.
 
+Press **L** on a track to listen to it without arming it. You can listen to a
+microphone and PC audio at the same time, which is useful for playing or
+recording over a backing track.
+
 **PC audio** asks you to share a tab or window with its audio — choose the one
-playing the music. Record it on its own pass: it cannot be armed together with
-live inputs, because the two sources have different clocks.
+playing the music. It can be armed together with input tracks: the engine
+captures the PC share on its own clock and the interface on another, then
+corrects the drift before saving each take. Keep the share alive until the
+take stops.
+
+Use the **out** menu in the toolbar to choose one or more master outputs. The
+first selected output is the primary; additional outputs play the same mix in
+parallel. The choice is remembered locally.
 
 Takes are written to IndexedDB after you stop. **Export WAV** downloads the
 audible mix; mute, solo, active takes, take gain and trim are already applied.
@@ -166,14 +185,24 @@ audible mix; mute, solo, active takes, take gain and trim are already applied.
   the take in progress.
 - Input tracks share the selected device (Input 1 / Input 2). Choosing a
   separate physical device per track is not available yet.
-- Effects shape live monitoring and recorded take playback; they are not
-  printed into takes or the exported WAV. The Web Audio chain approximates the
-  desktop DSP.
+- PC audio and inputs can be recorded together, but clock-drift correction is
+  best-effort. It uses a Chromium clock probe; if that API is unavailable, each
+  source is resampled to the session rate without drift correction. Very long
+  takes, dropouts, or a paused shared tab can still leave a small offset.
+- Master output selection relies on the browser's `setSinkId`. Chromium
+  supports it; other browsers may only offer the system default output.
+- The primary master output uses the Web Audio destination directly; extra
+  outputs go through a MediaStream and can lag it slightly. Separate channels
+  of one interface are only selectable if the OS exposes them as outputs.
+- Effects shape live monitoring and recorded take playback for input tracks;
+  they are not printed into takes or the exported WAV. The Web Audio chain
+  approximates the desktop DSP. PC audio stays dry.
 - Playback loads the active takes into memory.
 - Export is a single stereo float32 WAV at the session rate: no format,
   bit-depth or resampling choice, and no normalization of the mix itself.
-- PC audio captures through a second clock; dropouts are padded with silence and
-  a long take can drift by a few milliseconds against the input timeline.
+- PC audio still comes from a separate clock. The clock probe corrects the
+  measured rate, but browser dropouts or a paused shared tab can still create a
+  discontinuity that no resampling can reconstruct.
 - No comping, MIDI, plugin hosting or time-stretch.
 - Reverb and amp are musically simple by design (no IR cabinet, no neural
   models).

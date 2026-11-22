@@ -14,17 +14,13 @@ type ArmSlot struct {
 	Effects      mix.Effects
 }
 
-// ArmPlan returns the armed sources ordered by input channel. A system audio
-// track is always the only slot, because it records as its own stereo take.
+// ArmPlan returns the armed sources ordered by input channel, with PC audio
+// last. Inputs and one PC audio track may share the pass.
 func (s *Session) ArmPlan() ([]ArmSlot, error) {
 	var slots []ArmSlot
-	systemSlots := 0
 	for _, track := range s.tracks {
 		if !track.armed {
 			continue
-		}
-		if track.source.IsSystem() {
-			systemSlots++
 		}
 		slots = append(slots, ArmSlot{
 			TrackID:      track.id,
@@ -36,10 +32,7 @@ func (s *Session) ArmPlan() ([]ArmSlot, error) {
 	if len(slots) == 0 {
 		return nil, invalid("arm at least one track before recording")
 	}
-	if systemSlots > 0 && len(slots) > 1 {
-		return nil, conflict("record PC audio as its own take, then layer the input tracks over it")
-	}
-	sort.Slice(slots, func(left, right int) bool {
+	sort.SliceStable(slots, func(left, right int) bool {
 		if slots[left].Source.IsSystem() != slots[right].Source.IsSystem() {
 			return !slots[left].Source.IsSystem()
 		}

@@ -13,6 +13,7 @@ const App = {
   pcm: new Map(),
   peaks: new Map(),
   engine: null,
+  monitored: new Set(),
   selectedTrackId: null,
   frame: 0,
   playing: false,
@@ -26,9 +27,14 @@ const App = {
   eqTrackId: null,
   compGraph: null,
   compTrackId: null,
+  outputs: [],
+  outputIds: [""],
+  outputPreference: [""],
+  outputRefreshToken: 0,
 };
 
 const VOLUME_KEY = "gorecord.masterVolume";
+const OUTPUT_KEY = "gorecord.masterOutputs";
 
 // Keep a connection open for the launcher. Closing the window closes it and
 // lets the Go server stop; reloads reconnect within the shutdown grace period.
@@ -142,6 +148,16 @@ function bindControls() {
     updateVolumeLabel();
     App.engine?.setMasterVolume(level);
   });
+  App.outputPreference = readOutputPreference();
+  refreshOutputs();
+  document.getElementById("btn-output-rescan").addEventListener("click", () => refreshOutputs());
+  const outputMenu = document.getElementById("master-output");
+  document.addEventListener("pointerdown", (event) => {
+    if (outputMenu.open && !outputMenu.contains(event.target)) outputMenu.open = false;
+  });
+  if (navigator.mediaDevices?.addEventListener) {
+    navigator.mediaDevices.addEventListener("devicechange", () => refreshOutputs());
+  }
   document.getElementById("click-enabled").addEventListener("change", pushClick);
   document.getElementById("click-bpm").addEventListener("change", pushClick);
   document.getElementById("count-in").addEventListener("change", pushClick);
@@ -154,7 +170,7 @@ function bindControls() {
   });
   window.addEventListener("resize", drawTimelineNow);
   window.addEventListener("keydown", (event) => {
-    if (event.target.closest("input, select, textarea, button")) return;
+    if (event.target.closest("input, select, textarea, button, summary")) return;
     if (event.code === "Space") {
       event.preventDefault();
       togglePlayback();
@@ -173,7 +189,9 @@ function applyState(next) {
     App.selectedTrackId = next.tracks[0]?.id || null;
   }
   pruneAudio(next);
-  App.engine?.syncMonitoring(next);
+  const trackIds = new Set(next.tracks.map((track) => track.id));
+  for (const id of [...App.monitored]) if (!trackIds.has(id)) App.monitored.delete(id);
+  App.engine?.syncMonitoring(next, App.monitored);
   App.engine?.syncTakeLevels(next);
   App.engine?.setClick(next.click);
   document.getElementById("session-name").textContent = next.name;
@@ -255,9 +273,21 @@ function trackRow(track) {
   top.append(name, element("span", "track-kind", track.source === "system" ? "PC" : `in ${track.channel + 1}`));
   const controls = element("div", "track-controls");
   controls.append(
+    toggleButton("listen", "L", App.monitored.has(track.id), App.monitored.has(track.id) ? "Stop listening to this track" : "Listen without arming", () => {
+      const listening = !App.monitored.has(track.id);
+      if (listening) App.monitored.add(track.id);
+      else App.monitored.delete(track.id);
+      renderTracks();
+      App.engine?.syncMonitoring(App.state, App.monitored);
+      if (listening && document.getElementById("monitor-enabled").checked) openMonitoring();
+    }),
     toggleButton("arm", "●", track.armed, "Arm this track", async () => {
-      await dispatch("track.arm", { trackId: track.id, armed: !track.armed });
-      if (!App.recording) openMonitoring();
+      const arming = !track.armed;
+      const result = await dispatch("track.arm", { trackId: track.id, armed: arming });
+      if (!result) return;
+      if (arming) App.monitored.add(track.id);
+      renderTracks();
+      if (!App.recording && document.getElementById("monitor-enabled").checked) openMonitoring();
     }),
     toggleButton("mute", "M", track.muted, "Mute", () => dispatch("track.mute", { trackId: track.id, muted: !track.muted })),
     toggleButton("solo", "S", track.soloed, "Solo", () => dispatch("track.solo", { trackId: track.id, soloed: !track.soloed })),
@@ -283,9 +313,10 @@ function trackRow(track) {
     source.append(option);
   }
   source.value = track.source === "system" ? "system" : `input:${track.channel}`;
-  source.addEventListener("change", () => {
+  source.addEventListener("change", async () => {
     const [kind, channel] = source.value.split(":");
-    dispatch("track.source", { trackId: track.id, source: kind, channel: Number(channel || 0) });
+    const result = await dispatch("track.source", { trackId: track.id, source: kind, channel: Number(channel || 0) });
+    if (result && !App.recording && document.getElementById("monitor-enabled").checked) openMonitoring();
   });
   row.append(top, controls, source, volumeControl(track), panControl(track));
   App.meterNodes.set(track.id, bar);
@@ -619,6 +650,7 @@ function ensureEngine() {
     App.engine = new AudioEngine();
     App.engine.setMonitor(document.getElementById("monitor-enabled").checked);
     App.engine.setMasterVolume(readVolume());
+    App.engine.setOutputs(App.outputIds).catch((error) => setStatus(`Master output: ${error.message}`, "error"));
   }
   return App.engine;
 }
@@ -635,6 +667,138 @@ function updateVolumeLabel() {
   document.getElementById("master-volume-value").textContent = `${Math.round(level)}%`;
 }
 
+function readOutputPreference() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(OUTPUT_KEY) || "null");
+    if (!Array.isArray(stored)) return [""];
+    const ids = [...new Set(stored.filter((id) => typeof id === "string"))];
+    return ids.length ? ids : [""];
+  } catch (error) {
+    return [""];
+  }
+}
+
+function outputName(id) {
+  const output = App.outputs.find((item) => item.id === id);
+  return output ? output.label : (id ? "Selected output" : "System default");
+}
+
+function updateOutputLabel() {
+  const label = document.getElementById("output-label");
+  if (!label) return;
+  const names = App.outputIds.map(outputName);
+  label.textContent = names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0];
+  const menu = document.getElementById("master-output");
+  if (menu) menu.title = `Master output: ${names.join(", ")} — click to change`;
+  const hint = document.getElementById("output-hint");
+  if (hint) {
+    hint.textContent = names.length > 1
+      ? `${names.length} outputs active. The first is the primary.`
+      : "Select one or more outputs. The first is the primary.";
+  }
+}
+
+function renderOutputList() {
+  const list = document.getElementById("output-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!App.outputs.length) {
+    list.append(element("p", "output-empty", "No output devices found."));
+    return;
+  }
+  for (const output of App.outputs) {
+    const row = element("label", "output-option");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = output.id;
+    input.checked = App.outputIds.includes(output.id);
+    input.addEventListener("change", () => {
+      const checked = [...list.querySelectorAll("input[type=checkbox]:checked")].map((node) => node.value);
+      chooseOutputs(checked);
+    });
+    row.append(input, element("span", "output-name", output.label));
+    row.classList.toggle("primary", output.id === App.outputIds[0]);
+    list.append(row);
+  }
+}
+
+function syncOutputChecks() {
+  const list = document.getElementById("output-list");
+  if (!list) return;
+  for (const input of list.querySelectorAll("input[type=checkbox]")) {
+    input.checked = App.outputIds.includes(input.value);
+    input.closest(".output-option").classList.toggle("primary", input.value === App.outputIds[0]);
+  }
+}
+
+function chooseOutputs(ids) {
+  const available = new Set(App.outputs.map((output) => output.id));
+  let selected = [...new Set(ids.filter((id) => available.has(id)))];
+  if (!selected.length) selected = [""];
+  App.outputIds = selected;
+  App.outputPreference = selected;
+  try {
+    window.localStorage.setItem(OUTPUT_KEY, JSON.stringify(selected));
+  } catch (error) {
+    // Private browsing can refuse local storage; keep the choice in memory.
+  }
+  syncOutputChecks();
+  updateOutputLabel();
+  if (!App.engine) return;
+  App.engine.setOutputs(selected)
+    .then(() => setStatus(selected.length > 1 ? `Master on ${selected.length} outputs` : `Master output: ${outputName(selected[0])}`))
+    .catch((error) => setStatus(`Master output: ${error.message}`, "error"));
+}
+
+async function refreshOutputs() {
+  const token = ++App.outputRefreshToken;
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    App.outputs = [{ id: "", label: "System default" }];
+    App.outputIds = [""];
+    renderOutputList();
+    updateOutputLabel();
+    return;
+  }
+  let devices;
+  try {
+    devices = await navigator.mediaDevices.enumerateDevices();
+  } catch (error) {
+    setStatus("Could not list audio outputs.", "error");
+    return;
+  }
+  if (token !== App.outputRefreshToken) return;
+  const outputs = [];
+  const seen = new Set();
+  for (const device of devices) {
+    if (device.kind !== "audiooutput") continue;
+    const id = device.deviceId === "default" ? "" : device.deviceId;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const fallback = id ? `Output ${outputs.length + 1}` : "System default";
+    outputs.push({ id, label: device.label || fallback });
+  }
+  if (!seen.has("")) outputs.push({ id: "", label: "System default" });
+  outputs.sort((left, right) => {
+    if (left.id === "") return -1;
+    if (right.id === "") return 1;
+    return left.label.localeCompare(right.label);
+  });
+  App.outputs = outputs;
+  const available = new Set(outputs.map((output) => output.id));
+  let selected = App.outputPreference.filter((id) => available.has(id));
+  selected = [...new Set(selected)];
+  if (!selected.length) selected = [""];
+  App.outputIds = selected;
+  renderOutputList();
+  updateOutputLabel();
+  if (!App.engine) return;
+  try {
+    await App.engine.setOutputs(selected);
+  } catch (error) {
+    if (token === App.outputRefreshToken) setStatus(`Master output: ${error.message}`, "error");
+  }
+}
+
 function disposeEngine() {
   if (App.engine) App.engine.dispose();
   App.engine = null;
@@ -642,13 +806,22 @@ function disposeEngine() {
 
 async function openMonitoring() {
   if (!App.state || App.recording) return;
-  const armed = App.state.tracks.filter((track) => track.armed);
-  if (!armed.length || armed.some((track) => track.source === "system")) return;
+  const live = App.state.tracks.filter((track) => App.monitored.has(track.id));
+  const kinds = [...new Set(live.map((track) => track.source))]
+    .filter((kind) => kind === "input" || kind === "system");
+  if (!kinds.length) return;
   const engine = ensureEngine();
   try {
-    await engine.openInput(false, App.state.sampleRate);
-    engine.syncMonitoring(App.state);
-    setStatus("Monitoring — press record to capture.");
+    const failures = await engine.openSources(kinds, App.state.sampleRate);
+    if (App.engine !== engine || !App.state) return;
+    refreshOutputs();
+    engine.syncMonitoring(App.state, App.monitored);
+    if (failures.system) setStatus(sourceErrorMessage(failures.system, "system"), "error");
+    else if (failures.input) setStatus(sourceErrorMessage(failures.input, "input"), "error");
+    else {
+      const label = kinds.length > 1 ? "PC audio and input" : (kinds[0] === "system" ? "PC audio" : "input");
+      setStatus(`Monitoring ${label} — press record to capture.`);
+    }
   } catch (error) {
     setStatus(inputErrorMessage(error), "error");
   }
@@ -664,17 +837,19 @@ async function startRecording() {
   if (!App.state) return;
   const armed = App.state.tracks.filter((track) => track.armed);
   if (!armed.length) return setStatus("Arm a track before recording.", "error");
-  const system = armed.length === 1 && armed[0].source === "system";
-  if (!system && armed.some((track) => track.source === "system")) {
-    return setStatus("Record the PC audio track on its own, then layer inputs over it.", "error");
-  }
+  const kinds = [...new Set(armed.map((track) => track.source))];
   const engine = ensureEngine();
+  let failures;
   try {
-    await engine.openInput(system, App.state.sampleRate);
+    failures = await engine.openSources(kinds, App.state.sampleRate);
   } catch (error) {
-    return setStatus(inputErrorMessage(error), "error");
+    return setStatus(sourceErrorMessage(error, kinds[0]), "error");
   }
-  engine.syncMonitoring(App.state);
+  for (const kind of kinds) {
+    if (failures[kind]) return setStatus(sourceErrorMessage(failures[kind], kind), "error");
+  }
+  refreshOutputs();
+  engine.syncMonitoring(App.state, App.monitored);
   const countInBars = Math.min(2, Math.max(0, Number(App.state.click.countInBars) || 0));
   if (countInBars > 0) {
     App.countingIn = true;
@@ -725,7 +900,8 @@ async function startRecording() {
     return setStatus(error.message, "error");
   }
   ensureAnimation();
-  if (system) setStatus("Recording PC audio…");
+  if (kinds.length > 1) setStatus("Recording PC audio and input…");
+  else if (kinds[0] === "system") setStatus("Recording PC audio…");
   else if (armed.length > 1) setStatus(`Recording ${armed.length} inputs…`);
   else setStatus("Recording…");
 }
@@ -959,6 +1135,13 @@ function inputErrorMessage(error) {
   return error?.message || "The audio input could not be opened.";
 }
 
+function sourceErrorMessage(error, kind) {
+  if (kind !== "system") return inputErrorMessage(error);
+  if (error?.name === "NotAllowedError") return "PC audio sharing was cancelled or denied.";
+  if (error?.name === "NotFoundError") return "No tab audio was available to monitor.";
+  return error?.message || "PC audio could not be opened.";
+}
+
 function showPicker() {
   document.getElementById("picker").hidden = false;
   document.getElementById("app").hidden = true;
@@ -1005,6 +1188,7 @@ async function openSession(root) {
     const result = coreRequest("open", { root, project: record.project });
     const takes = await storage.loadTakes(root);
     disposeEngine();
+    App.monitored = new Set(result.state.tracks.filter((track) => track.armed).map((track) => track.id));
     App.pcm = new Map(takes.map((take) => [take.file, { channels: take.channels, sampleRate: take.sampleRate, samples: take.samples }]));
     App.peaks = new Map(takes.map((take) => [take.file, computePeaks(take.samples, take.channels)]));
     App.frame = 0;
@@ -1030,6 +1214,7 @@ async function createSession(name, sampleRate) {
   try {
     const result = coreRequest("create", { name, sampleRate });
     disposeEngine();
+    App.monitored = new Set();
     App.pcm = new Map();
     App.peaks = new Map();
     App.frame = 0;
@@ -1053,6 +1238,7 @@ async function deleteSession(session) {
   if (App.root === session.root) {
     disposeEngine();
     App.state = null;
+    App.monitored.clear();
     App.pcm.clear();
     App.peaks.clear();
     document.getElementById("app").hidden = true;

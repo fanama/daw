@@ -7,9 +7,8 @@ import (
 	"gorecord/domain/studio"
 )
 
-// BeginTake creates the take entry and its file path before the engine rolls,
-// so a crash still leaves a project that references the audio. A PC audio
-// track records as its own stereo take.
+// BeginTake creates the legacy single multichannel take entry before the
+// engine rolls. Mixed PC audio and inputs need BeginTrackTakes instead.
 func (s *Service) BeginTake(startFrame int) (session.Take, []session.ArmSlot, error) {
 	if err := s.requireSession(); err != nil {
 		return session.Take{}, nil, err
@@ -17,6 +16,9 @@ func (s *Service) BeginTake(startFrame int) (session.Take, []session.ArmSlot, er
 	plan, err := s.current.ArmPlan()
 	if err != nil {
 		return session.Take{}, nil, err
+	}
+	if hasMixedSources(plan) {
+		return session.Take{}, nil, errors.New("multi-source recording needs per-track takes")
 	}
 	number := s.current.NextTakeNumber()
 	file := s.takes.TakePath(s.root, number)
@@ -45,9 +47,9 @@ func (s *Service) BeginTake(startFrame int) (session.Take, []session.ArmSlot, er
 	return take, plan, s.Save()
 }
 
-// BeginTrackTakes creates one take per armed track, for engines that capture
-// each input channel separately. The desktop keeps its single multichannel
-// take through BeginTake.
+// BeginTrackTakes creates one take per armed track, including a PC audio track
+// captured alongside interface inputs. The desktop keeps its single
+// multichannel take through BeginTake.
 func (s *Service) BeginTrackTakes(startFrame int) ([]session.Take, []session.ArmSlot, error) {
 	if err := s.requireSession(); err != nil {
 		return nil, nil, err
@@ -82,6 +84,18 @@ func (s *Service) BeginTrackTakes(startFrame int) ([]session.Take, []session.Arm
 		return nil, nil, err
 	}
 	return takes, plan, nil
+}
+
+func hasMixedSources(plan []session.ArmSlot) bool {
+	hasInput, hasSystem := false, false
+	for _, slot := range plan {
+		if slot.Source.IsSystem() {
+			hasSystem = true
+		} else {
+			hasInput = true
+		}
+	}
+	return hasInput && hasSystem
 }
 
 // FinishTake stores the recorded length and whether the take was interrupted.
