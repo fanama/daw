@@ -10,10 +10,10 @@ type EQBand struct {
 	GainDB      float64
 }
 
-// EQ is a three band parametric equalizer.
+// EQ is a five band parametric equalizer spanning 20 Hz to 20 kHz.
 type EQ struct {
 	Enabled bool
-	Bands   [3]EQBand
+	Bands   [5]EQBand
 }
 
 // Amp is the guitar front end: drive into a bass/mid/treble tone stack.
@@ -70,10 +70,12 @@ func DefaultEffects() Effects {
 		Cab: Cab{Enabled: true, Character: 0.5},
 		EQ: EQ{
 			Enabled: true,
-			Bands: [3]EQBand{
+			Bands: [5]EQBand{
+				{FrequencyHz: 20, Q: 0.7},
 				{FrequencyHz: 100, Q: 0.7},
 				{FrequencyHz: 1000, Q: 0.9},
 				{FrequencyHz: 6000, Q: 0.7},
+				{FrequencyHz: 20000, Q: 0.7},
 			},
 		},
 		Comp:   Compressor{Enabled: false, ThresholdDB: -18, Ratio: 3, AttackMs: 10, ReleaseMs: 120, KneeDB: 6},

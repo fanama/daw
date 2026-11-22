@@ -292,6 +292,22 @@ button.mini {
   color: var(--muted);
 }
 
+.track-volume {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.track-volume input[type="range"] { flex: 1; min-width: 0; }
+.track-volume .volume-value {
+  min-width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .hint {
   color: var(--muted);
   font-size: 12px;
@@ -401,10 +417,18 @@ button.mini {
   stroke-width: 2;
   stroke-linejoin: round;
 }
-.fx-graph .band-0 { fill: var(--accent); }
-.fx-graph .band-1 { fill: var(--eq-mid); }
+.fx-graph .band-0, .fx-graph .band-4 { fill: var(--accent); }
+.fx-graph .band-1, .fx-graph .band-3 { fill: var(--eq-mid); }
 .fx-graph .band-2 { fill: var(--eq-high); }
 .fx-graph .comp-dot { fill: var(--warn); stroke: #090d13; stroke-width: 2; }
+.fx-graph .voice-dot { fill: #7aa7ff; stroke: #090d13; stroke-width: 1; }
+.fx-graph .voice-guide line {
+  stroke: #7aa7ff;
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0.45;
+}
+.fx-graph .voice-readout { fill: #7aa7ff; }
 
 .statusbar {
   display: flex;

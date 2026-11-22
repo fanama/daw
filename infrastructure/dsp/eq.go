@@ -3,7 +3,7 @@ package dsp
 import "gorecord/domain/mix"
 
 type eqStage struct {
-	bands   [3]biquad
+	bands   [5]biquad
 	enabled bool
 }
 

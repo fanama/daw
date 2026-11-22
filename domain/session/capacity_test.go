@@ -46,7 +46,7 @@ func TestEffectsNormalizeClampsEveryParameter(t *testing.T) {
 	effects := mix.Effects{
 		Amp:    mix.Amp{Drive: 4, BassDB: -99, MidDB: 99, LevelDB: 50},
 		Cab:    mix.Cab{Character: -1},
-		EQ:     mix.EQ{Bands: [3]mix.EQBand{{FrequencyHz: 5, Q: 100, GainDB: 90}}},
+		EQ:     mix.EQ{Bands: [5]mix.EQBand{{FrequencyHz: 5, Q: 100, GainDB: 90}}},
 		Comp:   mix.Compressor{ThresholdDB: -200, Ratio: 50, AttackMs: 0, ReleaseMs: 1, KneeDB: 40, MakeupDB: 90},
 		Reverb: mix.Reverb{Size: 9, Damp: -3, Mix: 3, PreDelayMs: 900},
 	}

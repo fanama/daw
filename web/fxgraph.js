@@ -14,6 +14,9 @@ const PLOT_HEIGHT = BOTTOM - TOP;
 const SPECTRUM_POINTS = 180;
 const SPECTRUM_FLOOR = -72;
 const SPECTRUM_CEIL = 0;
+const VOICE_POINTS = 64;
+const VOICE_FLOOR = -60;
+const VOICE_CEIL = 0;
 
 let graphSequence = 0;
 
@@ -127,6 +130,9 @@ function eqGraph(settings, sampleRate) {
   const { svg, plot, fill, spectrumFill, element } = graphShell(
     "eq", "Equalizer frequency response with live spectrum");
   const rate = Number(sampleRate) || 48000;
+  const bandSlots = Array.isArray(settings?.Bands) && settings.Bands.length
+    ? settings.Bands.length
+    : 5;
 
   for (const frequency of [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]) {
     addNode(svg, "line", {
@@ -157,10 +163,9 @@ function eqGraph(settings, sampleRate) {
   const overlay = addNode(svg, "g");
   const dots = [];
   const labels = [];
-  const letters = ["L", "M", "H"];
   const levels = new Float32Array(SPECTRUM_POINTS).fill(SPECTRUM_FLOOR);
   let hasSpectrum = false;
-  for (let index = 0; index < 3; index++) {
+  for (let index = 0; index < bandSlots; index++) {
     dots.push(addNode(overlay, "circle", { r: "4", class: `band-dot band-${index}` }));
     labels.push(addNode(overlay, "text", {
       class: `band-label band-${index}`, "text-anchor": "middle",
@@ -192,7 +197,7 @@ function eqGraph(settings, sampleRate) {
         points.map((point) => `L${point.x.toFixed(1)},${point.y.toFixed(1)}`).join("") +
         `L${RIGHT},${zero}Z`);
 
-      for (let index = 0; index < 3; index++) {
+      for (let index = 0; index < bandSlots; index++) {
         const band = bands[index];
         if (!band) {
           dots[index].setAttribute("display", "none");
@@ -207,7 +212,7 @@ function eqGraph(settings, sampleRate) {
         dots[index].setAttribute("cy", y.toFixed(1));
         labels[index].setAttribute("x", x.toFixed(1));
         labels[index].setAttribute("y", (y < TOP + 14 ? y + 14 : y - 8).toFixed(1));
-        labels[index].textContent = `${letters[index]} ${formatHz(band.FrequencyHz)}`;
+        labels[index].textContent = formatHz(band.FrequencyHz);
       }
     },
     spectrum(data) {
@@ -274,9 +279,13 @@ function compressedDb(input, threshold, ratio, knee) {
 }
 
 function compressorGraph(settings) {
-  const { svg, plot, fill, element } = graphShell("comp", "Compressor level transfer curve");
+  const { svg, plot, fill, element } = graphShell(
+    "comp", "Compressor level transfer curve with a live voice trace");
   const xFor = (decibels) => LEFT + ((Math.min(0, Math.max(-60, decibels)) + 60) / 60) * PLOT_WIDTH;
   const yFor = (decibels) => TOP + ((24 - Math.min(24, Math.max(-60, decibels))) / 84) * PLOT_HEIGHT;
+  const curveSettings = { threshold: -18, ratio: 3, knee: 6, makeup: 0 };
+  const voiceY = (input) => yFor(compressedDb(
+    input, curveSettings.threshold, curveSettings.ratio, curveSettings.knee) + curveSettings.makeup);
 
   for (const decibels of [-60, -48, -36, -24, -12, 0]) {
     const x = xFor(decibels);
@@ -306,6 +315,22 @@ function compressorGraph(settings) {
   const curve = addNode(plot, "path", { class: "curve" });
   const thresholdDot = addNode(svg, "circle", { r: "3.5", class: "comp-dot" });
 
+  const guide = addNode(svg, "g", { class: "voice-guide", display: "none" });
+  const guideIn = addNode(guide, "line");
+  const guideOut = addNode(guide, "line");
+  const voiceLayer = addNode(svg, "g", { class: "voice-trace", display: "none" });
+  const voiceDots = [];
+  for (let index = 0; index < VOICE_POINTS; index++) {
+    voiceDots.push(addNode(voiceLayer, "circle", { class: "voice-dot", r: "1.6", display: "none" }));
+  }
+  const voiceReadout = addNode(svg, "text", {
+    class: "readout voice-readout", "text-anchor": "end",
+  });
+  const voiceLevels = new Float32Array(VOICE_POINTS).fill(VOICE_FLOOR);
+  let voiceWrite = 0;
+  let voiceFilled = 0;
+  let voiceSmooth = VOICE_FLOOR;
+
   const graph = {
     element,
     update(next) {
@@ -315,6 +340,10 @@ function compressorGraph(settings) {
       const ratio = clamp(current.Ratio, 1, 20, 3);
       const knee = clamp(current.KneeDB, 0, 12, 6);
       const makeup = clamp(current.MakeupDB, 0, 24, 0);
+      curveSettings.threshold = threshold;
+      curveSettings.ratio = ratio;
+      curveSettings.knee = knee;
+      curveSettings.makeup = makeup;
       const points = [];
       for (let index = 0; index <= 180; index++) {
         const input = -60 + (60 * index) / 180;
@@ -346,6 +375,55 @@ function compressorGraph(settings) {
       thresholdDot.setAttribute("cx", x.toFixed(1));
       thresholdDot.setAttribute("cy",
         yFor(compressedDb(threshold, threshold, ratio, knee) + makeup).toFixed(1));
+    },
+    voice(data) {
+      const rms = Number(data?.rms) || 0;
+      if (rms < 0.000001) {
+        voiceFilled = 0;
+        voiceWrite = 0;
+        voiceSmooth = VOICE_FLOOR;
+        voiceLayer.setAttribute("display", "none");
+        guide.setAttribute("display", "none");
+        voiceReadout.textContent = "";
+        return;
+      }
+      voiceLayer.removeAttribute("display");
+      guide.removeAttribute("display");
+      const input = Math.min(VOICE_CEIL, Math.max(VOICE_FLOOR, 20 * Math.log10(rms)));
+      voiceSmooth += (input - voiceSmooth) * (input > voiceSmooth ? 0.5 : 0.2);
+      voiceLevels[voiceWrite] = voiceSmooth;
+      voiceWrite = (voiceWrite + 1) % VOICE_POINTS;
+      voiceFilled = Math.min(voiceFilled + 1, VOICE_POINTS);
+      for (let age = 0; age < VOICE_POINTS; age++) {
+        const dot = voiceDots[age];
+        if (age >= voiceFilled) {
+          dot.setAttribute("display", "none");
+          continue;
+        }
+        const level = voiceLevels[(voiceWrite - 1 - age + VOICE_POINTS) % VOICE_POINTS];
+        dot.removeAttribute("display");
+        dot.setAttribute("cx", xFor(level).toFixed(1));
+        dot.setAttribute("cy", voiceY(level).toFixed(1));
+        dot.setAttribute("r", (age === 0 ? 3.4 : Math.max(1, 2.6 - age * 0.03)).toFixed(2));
+        dot.setAttribute("opacity",
+          (age === 0 ? 1 : Math.max(0.06, 0.8 * (1 - age / VOICE_POINTS))).toFixed(2));
+      }
+      const x = xFor(voiceSmooth);
+      const y = voiceY(voiceSmooth);
+      const output = Math.min(24, Math.max(-60, compressedDb(
+        voiceSmooth, curveSettings.threshold, curveSettings.ratio, curveSettings.knee)
+        + curveSettings.makeup));
+      guideIn.setAttribute("x1", x.toFixed(1));
+      guideIn.setAttribute("y1", y.toFixed(1));
+      guideIn.setAttribute("x2", x.toFixed(1));
+      guideIn.setAttribute("y2", BOTTOM);
+      guideOut.setAttribute("x1", LEFT);
+      guideOut.setAttribute("y1", y.toFixed(1));
+      guideOut.setAttribute("x2", x.toFixed(1));
+      guideOut.setAttribute("y2", y.toFixed(1));
+      voiceReadout.setAttribute("x", RIGHT - 4);
+      voiceReadout.setAttribute("y", BOTTOM - 5);
+      voiceReadout.textContent = `${voiceSmooth.toFixed(0)} in · ${output.toFixed(0)} out`;
     },
   };
   graph.update(settings);

@@ -88,6 +88,25 @@ func effectsFromDomain(effects mix.Effects) effectsJSON {
 	}
 }
 
+// eqToDomain restores the equalizer and migrates the three bands of a v1
+// project into the middle slots, leaving the 20 Hz and 20 kHz bands flat.
+func eqToDomain(stored eqJSON) mix.EQ {
+	eq := mix.DefaultEffects().EQ
+	eq.Enabled = stored.Enabled
+	offset := 0
+	if len(stored.Bands) == 3 && len(eq.Bands) == 5 {
+		offset = 1
+	}
+	for index := 0; index < len(stored.Bands) && index+offset < len(eq.Bands); index++ {
+		eq.Bands[index+offset] = mix.EQBand{
+			FrequencyHz: stored.Bands[index].FrequencyHz,
+			Q:           stored.Bands[index].Q,
+			GainDB:      stored.Bands[index].GainDB,
+		}
+	}
+	return eq
+}
+
 func effectsToDomain(stored effectsJSON) mix.Effects {
 	effects := mix.DefaultEffects()
 	effects.Amp = mix.Amp{
@@ -99,14 +118,7 @@ func effectsToDomain(stored effectsJSON) mix.Effects {
 		LevelDB:  stored.Amp.LevelDB,
 	}
 	effects.Cab = mix.Cab{Enabled: stored.Cab.Enabled, Character: stored.Cab.Character}
-	effects.EQ.Enabled = stored.EQ.Enabled
-	for index := 0; index < len(effects.EQ.Bands) && index < len(stored.EQ.Bands); index++ {
-		effects.EQ.Bands[index] = mix.EQBand{
-			FrequencyHz: stored.EQ.Bands[index].FrequencyHz,
-			Q:           stored.EQ.Bands[index].Q,
-			GainDB:      stored.EQ.Bands[index].GainDB,
-		}
-	}
+	effects.EQ = eqToDomain(stored.EQ)
 	effects.Comp = mix.Compressor{
 		Enabled:     stored.Comp.Enabled,
 		ThresholdDB: stored.Comp.ThresholdDB,

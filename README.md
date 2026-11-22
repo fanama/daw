@@ -38,9 +38,16 @@ packaging/macos/   Info.plist for the double-clickable app bundle
 - Layer takes on a sample-accurate timeline; previous takes play back while you
   record, and each take stores its start frame.
 - Per-track monitor chain: drive + tone stack → cabinet filter → 3-band EQ →
-  compressor → reverb. Effects are monitor-only in the browser.
+  compressor → reverb. The equalizer has five bands at 20 Hz, 100 Hz, 1 kHz,
+  6 kHz and 20 kHz. The chain is heard on live monitoring and on the playback
+  of recorded takes, but it is never printed into a take.
+- Per-track monitor volume fader: it changes what monitoring and take playback
+  sound like, but it is not printed into takes or the exported WAV.
 - Live spectrum analyzer behind the Equalizer curve, fed by the monitored
   signal and updated while you play.
+- Live voice trace on the compressor transfer curve: the recent input level
+  rides the curve with a crosshair and an input/output readout, fed by the dry
+  monitored signal.
 - Records the computer's own output onto a dedicated stereo track by sharing a
   tab or window with its audio.
 - Live scrolling waveform and per-track meters while recording.
@@ -153,8 +160,9 @@ audible mix; mute, solo, active takes, take gain and trim are already applied.
   the take in progress.
 - Input tracks share the selected device (Input 1 / Input 2). Choosing a
   separate physical device per track is not available yet.
-- Effects are monitor-only; the Web Audio chain approximates the desktop DSP and
-  there is no "print effects".
+- Effects shape live monitoring and recorded take playback; they are not
+  printed into takes or the exported WAV. The Web Audio chain approximates the
+  desktop DSP.
 - Playback loads the active takes into memory.
 - Export is a single stereo float32 WAV at the session rate: no format,
   bit-depth or resampling choice, and no normalization of the mix itself.

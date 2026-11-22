@@ -28,6 +28,10 @@ function resample(samples, channels, fromRate, toRate) {
   return output;
 }
 
+function trackLevel(track) {
+  return Math.pow(10, (Number(track.volumeDb) || 0) / 20);
+}
+
 export class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -41,6 +45,9 @@ export class AudioEngine {
     this.splitter = null;
     this.system = false;
     this.chains = new Map();
+    this.playbackChains = new Map();
+    this.playbackVolumes = new Map();
+    this.playbackAnalysers = new Map();
     this.tuners = null;
     this.sources = [];
     this.takeGains = new Map();
@@ -172,7 +179,9 @@ export class AudioEngine {
 
   syncMonitoring(state) {
     this.lastState = state;
-    if (!this.ctx || !this.splitter) return;
+    if (!this.ctx) return;
+    this.syncPlaybackChains(state);
+    if (!this.splitter) return;
     const tracks = state.tracks.filter((track) => track.source === "input");
     const wanted = new Set(tracks.map((track) => track.id));
     for (const [id, chain] of this.chains) {
@@ -192,23 +201,98 @@ export class AudioEngine {
         analyser.smoothingTimeConstant = 0.65;
         analyser.minDecibels = -90;
         analyser.maxDecibels = -10;
+        const inputAnalyser = this.ctx.createAnalyser();
+        inputAnalyser.fftSize = 2048;
         const gain = this.ctx.createGain();
         built.output.connect(analyser);
         analyser.connect(gain);
         gain.connect(this.monitor);
         this.splitter.connect(built.input, Math.min(track.channel, 1));
+        this.splitter.connect(inputAnalyser, Math.min(track.channel, 1));
         chain = {
           ...built,
           analyser,
+          inputAnalyser,
           gain,
           signature,
           meterBuffer: new Float32Array(analyser.fftSize),
+          inputBuffer: new Float32Array(inputAnalyser.fftSize),
           spectrumBuffer: new Float32Array(analyser.frequencyBinCount),
+          dispose() {
+            built.dispose();
+            for (const node of [analyser, inputAnalyser, gain]) {
+              try {
+                node.disconnect();
+              } catch (error) {
+                // Nodes may already be detached by the browser.
+              }
+            }
+          },
         };
         this.chains.set(track.id, chain);
       }
-      chain.gain.gain.value = track.armed && !track.muted ? 1 : 0;
+      chain.gain.gain.value = track.armed && !track.muted ? trackLevel(track) : 0;
     }
+  }
+
+  // Recorded takes play through the same per-track chain as live monitoring, so
+  // an effects or volume change is heard whether the track is live or already
+  // recorded.
+  syncPlaybackChains(state) {
+    const tracks = new Map(state.tracks.map((track) => [track.id, track]));
+    const now = this.ctx.currentTime;
+    for (const track of tracks.values()) {
+      const volume = this.playbackVolumes.get(track.id);
+      if (volume) volume.gain.setTargetAtTime(trackLevel(track), now, 0.015);
+      if (this.playbackChains.has(track.id)) this.playbackChain(track);
+    }
+    for (const [id, chain] of this.playbackChains) {
+      if (tracks.has(id)) continue;
+      chain.dispose();
+      this.playbackChains.delete(id);
+      const volume = this.playbackVolumes.get(id);
+      if (volume) volume.disconnect();
+      this.playbackVolumes.delete(id);
+      const playback = this.playbackAnalysers.get(id);
+      if (playback) playback.analyser.disconnect();
+      this.playbackAnalysers.delete(id);
+    }
+  }
+
+  playbackChain(track) {
+    const signature = JSON.stringify(track.effects);
+    const current = this.playbackChains.get(track.id);
+    if (current && current.signature === signature) return current;
+    const built = buildEffectsChain(this.ctx, track.effects);
+    built.output.connect(this.master);
+    const volume = this.trackVolume(track);
+    volume.disconnect();
+    volume.connect(built.input);
+    if (current) current.dispose();
+    const chain = { ...built, signature };
+    this.playbackChains.set(track.id, chain);
+    return chain;
+  }
+
+  trackVolume(track) {
+    let node = this.playbackVolumes.get(track.id);
+    if (!node) {
+      node = this.ctx.createGain();
+      this.playbackVolumes.set(track.id, node);
+    }
+    node.gain.value = trackLevel(track);
+    return node;
+  }
+
+  playbackAnalyser(track) {
+    let entry = this.playbackAnalysers.get(track.id);
+    if (!entry) {
+      const analyser = this.ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      entry = { analyser, buffer: new Float32Array(analyser.fftSize) };
+      this.playbackAnalysers.set(track.id, entry);
+    }
+    return entry.analyser;
   }
 
   meter(trackId) {
@@ -231,6 +315,31 @@ export class AudioEngine {
     }
     chain.analyser.getFloatFrequencyData(chain.spectrumBuffer);
     return { bins: chain.spectrumBuffer, sampleRate: this.ctx.sampleRate };
+  }
+
+  // level reports the dry signal feeding a track's compressor, live while
+  // monitoring or from the take during playback, so the compressor graph can
+  // map it onto the transfer curve.
+  level(trackId) {
+    const playback = this.playbackAnalysers.get(trackId);
+    const chain = this.chains.get(trackId);
+    if (playback && this.playing && !this.capture) {
+      return this.readLevel(playback.analyser, playback.buffer);
+    }
+    if (chain?.inputAnalyser) {
+      return this.readLevel(chain.inputAnalyser, chain.inputBuffer);
+    }
+    if (playback) return this.readLevel(playback.analyser, playback.buffer);
+    return null;
+  }
+
+  readLevel(analyser, buffer) {
+    analyser.getFloatTimeDomainData(buffer);
+    let sum = 0;
+    for (let index = 0; index < buffer.length; index++) {
+      sum += buffer[index] * buffer[index];
+    }
+    return { rms: Math.sqrt(sum / buffer.length) };
   }
 
   tuner(channel) {
@@ -299,8 +408,11 @@ export class AudioEngine {
       const gain = this.ctx.createGain();
       gain.gain.value = Math.pow(10, take.gainDb / 20);
       this.takeGains.set(take.id, gain);
+      this.playbackChain(track);
+      const volume = this.trackVolume(track);
       source.connect(gain);
-      gain.connect(this.master);
+      gain.connect(this.playbackAnalyser(track));
+      gain.connect(volume);
       source.start(when + Math.max(0, (startAt - fromFrame) / rate), (trimStart + skip) / rate, (length - skip) / rate);
       this.sources.push(source, gain);
     }
@@ -501,6 +613,9 @@ export class AudioEngine {
     this.ctx = null;
     this.buffers.clear();
     this.chains.clear();
+    this.playbackChains.clear();
+    this.playbackVolumes.clear();
+    this.playbackAnalysers.clear();
     this.sources = [];
   }
 }

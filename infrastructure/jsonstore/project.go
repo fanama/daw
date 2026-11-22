@@ -8,8 +8,9 @@ import (
 	"gorecord/domain/session"
 )
 
-// SchemaVersion is the project file version this build writes.
-const SchemaVersion = 1
+// SchemaVersion is the project file version this build writes. Version 2 stores
+// the five-band equalizer; version 1 projects are migrated when loaded.
+const SchemaVersion = 2
 
 // ErrUnsupportedSchema is returned when a project was written by a newer app.
 var ErrUnsupportedSchema = errors.New("jsonstore: project schema is newer than this app")
@@ -49,6 +50,7 @@ type trackJSON struct {
 	Armed        bool        `json:"armed"`
 	Mute         bool        `json:"mute"`
 	Solo         bool        `json:"solo"`
+	VolumeDB     float64     `json:"volumeDb"`
 	PrintEffects bool        `json:"printEffects"`
 	Effects      effectsJSON `json:"effects"`
 	ActiveTakeID string      `json:"activeTakeId"`
@@ -123,6 +125,7 @@ func trackFromState(track session.TrackState) trackJSON {
 		Armed:        track.Armed,
 		Mute:         track.Muted,
 		Solo:         track.Soloed,
+		VolumeDB:     track.VolumeDB,
 		PrintEffects: track.PrintEffects,
 		Effects:      effectsFromDomain(track.Effects),
 		ActiveTakeID: track.ActiveTakeID.String(),
@@ -188,6 +191,7 @@ func tracksToState(tracks []trackJSON) []session.TrackState {
 			Armed:        track.Armed,
 			Muted:        track.Mute,
 			Soloed:       track.Solo,
+			VolumeDB:     track.VolumeDB,
 			PrintEffects: track.PrintEffects,
 			Effects:      effectsToDomain(track.Effects),
 			ActiveTakeID: session.TakeID(track.ActiveTakeID),

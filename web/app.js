@@ -23,6 +23,8 @@ const App = {
   saving: Promise.resolve(),
   eqGraph: null,
   eqTrackId: null,
+  compGraph: null,
+  compTrackId: null,
 };
 
 const VOLUME_KEY = "gorecord.masterVolume";
@@ -35,7 +37,7 @@ appLive.onerror = () => {};
 const EFFECT_BLOCKS = [
   ["Amp", "Amp", [["Drive", "Drive", 0, 1, 0.01], ["Level", "LevelDB", -24, 6, 0.5], ["Bass", "BassDB", -12, 12, 0.5], ["Mid", "MidDB", -12, 12, 0.5], ["Treble", "TrebleDB", -12, 12, 0.5]]],
   ["Cabinet", "Cab", [["Character", "Character", 0, 1, 0.01]]],
-  ["Equalizer", "EQ", [["Low", "Bands.0.GainDB", -24, 24, 0.5], ["Mid", "Bands.1.GainDB", -24, 24, 0.5], ["High", "Bands.2.GainDB", -24, 24, 0.5]]],
+  ["Equalizer", "EQ", [["20", "Bands.0.GainDB", -24, 24, 0.5], ["100", "Bands.1.GainDB", -24, 24, 0.5], ["1k", "Bands.2.GainDB", -24, 24, 0.5], ["6k", "Bands.3.GainDB", -24, 24, 0.5], ["20k", "Bands.4.GainDB", -24, 24, 0.5]]],
   ["Compressor", "Comp", [["Threshold", "ThresholdDB", -60, 0, 1], ["Ratio", "Ratio", 1, 20, 0.5], ["Makeup", "MakeupDB", 0, 24, 0.5]]],
   ["Reverb", "Reverb", [["Size", "Size", 0, 1, 0.01], ["Damp", "Damp", 0, 1, 0.01], ["Mix", "Mix", 0, 1, 0.01]]],
 ];
@@ -280,9 +282,29 @@ function trackRow(track) {
     const [kind, channel] = source.value.split(":");
     dispatch("track.source", { trackId: track.id, source: kind, channel: Number(channel || 0) });
   });
-  row.append(top, controls, source);
+  row.append(top, controls, source, volumeControl(track));
   App.meterNodes.set(track.id, bar);
   return row;
+}
+
+function volumeControl(track) {
+  const wrap = element("label", "track-volume");
+  wrap.title = "Monitor volume";
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.min = "-60";
+  slider.max = "6";
+  slider.step = "1";
+  slider.value = String(Math.round(track.volumeDb || 0));
+  const value = element("span", "volume-value", `${Math.round(Number(slider.value))} dB`);
+  slider.addEventListener("input", () => {
+    value.textContent = `${Math.round(Number(slider.value))} dB`;
+  });
+  slider.addEventListener("change", () => {
+    dispatch("track.volume", { trackId: track.id, volumeDb: Number(slider.value) });
+  });
+  wrap.append(element("span", "unit", "vol"), slider, value);
+  return wrap;
 }
 
 function addInputTrack() {
@@ -304,6 +326,8 @@ function renderInspector() {
   panel.innerHTML = "";
   App.eqGraph = null;
   App.eqTrackId = null;
+  App.compGraph = null;
+  App.compTrackId = null;
   const track = currentTrack();
   if (!track) {
     panel.append(element("p", "empty", "Select a track to edit its takes and effects."));
@@ -431,6 +455,10 @@ function effectBlock(track, title, key, controls) {
   if (graph && key === "EQ") {
     App.eqGraph = graph;
     App.eqTrackId = track.id;
+  }
+  if (graph && key === "Comp") {
+    App.compGraph = graph;
+    App.compTrackId = track.id;
   }
   for (const [label, path, min, max, step] of controls) {
     block.append(effectRow(track, key, label, path, min, max, step, graph));
@@ -760,14 +788,15 @@ function drawTimelineNow() {
 }
 
 function updateSpectrum() {
-  const graph = App.eqGraph;
-  if (!graph) return;
   const track = currentTrack();
-  if (!track || track.id !== App.eqTrackId || !App.engine) {
-    graph.spectrum(null);
-    return;
+  if (App.eqGraph) {
+    const live = track && track.id === App.eqTrackId && App.engine;
+    App.eqGraph.spectrum(live ? App.engine.spectrum(track.id) : null);
   }
-  graph.spectrum(App.engine.spectrum(track.id));
+  if (App.compGraph) {
+    const live = track && track.id === App.compTrackId && App.engine;
+    App.compGraph.voice(live ? App.engine.level(track.id) : null);
+  }
 }
 
 function updateMeters() {

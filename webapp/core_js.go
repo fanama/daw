@@ -103,6 +103,8 @@ func (c *core) applyTrack(req request) error {
 		return c.service.SetMute(trackID, req.Muted)
 	case "track.solo":
 		return c.service.SetSolo(trackID, req.Soloed)
+	case "track.volume":
+		return c.service.SetTrackVolume(trackID, req.VolumeDB)
 	case "track.source":
 		return c.service.SetSource(trackID, trackSource(req.Source, req.Channel))
 	case "track.print":

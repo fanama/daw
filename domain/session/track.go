@@ -1,6 +1,7 @@
 package session
 
 import (
+	"math"
 	"strings"
 
 	"gorecord/domain/mix"
@@ -15,6 +16,7 @@ type Track struct {
 	armed        bool
 	muted        bool
 	soloed       bool
+	volumeDB     float64
 	printEffects bool
 	effects      mix.Effects
 	activeTakeID TakeID
@@ -72,6 +74,9 @@ func (t Track) IsMuted() bool { return t.muted }
 // IsSoloed reports whether the track participates in a solo group.
 func (t Track) IsSoloed() bool { return t.soloed }
 
+// VolumeDB returns the monitor fader level in decibels.
+func (t Track) VolumeDB() float64 { return t.volumeDB }
+
 // PrintsEffects reports whether the take is written with effects baked in.
 func (t Track) PrintsEffects() bool { return t.printEffects }
 
@@ -98,6 +103,7 @@ func (t Track) state() TrackState {
 		Armed:        t.armed,
 		Muted:        t.muted,
 		Soloed:       t.soloed,
+		VolumeDB:     t.volumeDB,
 		PrintEffects: t.printEffects,
 		Effects:      t.effects,
 		ActiveTakeID: t.activeTakeID,
@@ -116,10 +122,24 @@ func trackFromState(state TrackState) (Track, error) {
 	track.armed = state.Armed
 	track.muted = state.Muted
 	track.soloed = state.Soloed
+	track.volumeDB = clampVolumeDB(state.VolumeDB)
 	track.printEffects = state.PrintEffects && track.source.IsInput()
 	track.effects = state.Effects.Normalize()
 	track.activeTakeID = state.ActiveTakeID
 	return track, nil
+}
+
+// Track volume is a monitor fader: it changes what is heard, never the take.
+const (
+	MinTrackVolumeDB = -60.0
+	MaxTrackVolumeDB = 6.0
+)
+
+func clampVolumeDB(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	return math.Max(MinTrackVolumeDB, math.Min(MaxTrackVolumeDB, value))
 }
 
 func validateInputChannel(channel int) error {

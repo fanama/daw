@@ -16,6 +16,7 @@ type TrackState struct {
 	Armed        bool
 	Muted        bool
 	Soloed       bool
+	VolumeDB     float64
 	PrintEffects bool
 	Effects      mix.Effects
 	ActiveTakeID TakeID

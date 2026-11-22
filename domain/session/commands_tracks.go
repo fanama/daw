@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"gorecord/domain/mix"
@@ -69,6 +70,19 @@ func (s *Session) SetSolo(id TrackID, soloed bool) error {
 		return err
 	}
 	s.tracks[index].soloed = soloed
+	return nil
+}
+
+// SetVolume sets a track's monitor fader in decibels.
+func (s *Session) SetVolume(id TrackID, volumeDB float64) error {
+	index, err := s.trackIndex(id)
+	if err != nil {
+		return err
+	}
+	if math.IsNaN(volumeDB) || math.IsInf(volumeDB, 0) {
+		return invalid("track volume must be finite")
+	}
+	s.tracks[index].volumeDB = clampVolumeDB(volumeDB)
 	return nil
 }
 

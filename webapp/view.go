@@ -38,6 +38,7 @@ type webTrack struct {
 	Armed        bool        `json:"armed"`
 	Muted        bool        `json:"muted"`
 	Soloed       bool        `json:"soloed"`
+	VolumeDB     float64     `json:"volumeDb"`
 	PrintEffects bool        `json:"printEffects"`
 	ActiveTakeID string      `json:"activeTakeId"`
 	Effects      mix.Effects `json:"effects"`
@@ -104,6 +105,7 @@ type request struct {
 	CountInBars int          `json:"countInBars"`
 	Latency     int          `json:"latency"`
 	GainDB      float64      `json:"gainDb"`
+	VolumeDB    float64      `json:"volumeDb"`
 	StartFrame  int          `json:"startFrame"`
 	EndFrame    int          `json:"endFrame"`
 	Frames      int          `json:"frames"`
@@ -165,6 +167,7 @@ func newWebTrack(track session.TrackState) webTrack {
 		Armed:        track.Armed,
 		Muted:        track.Muted,
 		Soloed:       track.Soloed,
+		VolumeDB:     track.VolumeDB,
 		PrintEffects: track.PrintEffects,
 		ActiveTakeID: track.ActiveTakeID.String(),
 		Effects:      track.Effects,
