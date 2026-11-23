@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gorecord</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app" hidden>
+    <header class="topbar">
+      <div class="brand">gorecord<span id="session-name" class="session-name"></span></div>
+      <div class="transport">
+        <button id="btn-record" class="round record" title="Record (R)" aria-label="Record"></button>
+        <button id="btn-play" class="round" title="Play (Space)" aria-label="Play">▶</button>
+        <button id="btn-stop" class="round" title="Stop" aria-label="Stop">■</button>
+        <span id="timecode" class="timecode">00:00.000</span>
+      </div>
+      <div class="settings">
+        <label class="switch"><input type="checkbox" id="click-enabled"> click</label>
+        <input type="number" id="click-bpm" class="bpm" min="20" max="300" step="1" value="120" aria-label="Tempo">
+        <span class="unit">BPM</span>
+        <label class="switch" title="One bar of clicks before recording"><input type="checkbox" id="count-in"> count-in</label>
+        <label class="switch"><input type="checkbox" id="monitor-enabled" checked> monitor</label>
+        <details id="master-output" class="output-menu">
+          <summary title="Choose master output devices">
+            <span class="unit">out</span>
+            <span id="output-label">Default</span>
+          </summary>
+          <div class="output-panel">
+            <div class="output-head">
+              <strong>Master outputs</strong>
+              <button id="btn-output-rescan" class="mini" type="button" title="Rescan output devices">↻</button>
+            </div>
+            <div id="output-list" class="output-list"></div>
+            <p id="output-hint" class="output-hint">Select one or more outputs. The first is the primary.</p>
+          </div>
+        </details>
+        <label class="switch volume" title="Output volume">
+          <span class="unit">vol</span>
+          <input type="range" id="master-volume" min="0" max="100" step="1" value="100" aria-label="Output volume">
+          <span id="master-volume-value" class="vol-value">100%</span>
+        </label>
+      </div>
+      <div class="actions">
+        <span id="tuner" class="tuner" title="Tuner">—</span>
+        <button id="btn-marker" class="ghost" title="Add a marker at the playhead (M)">Marker</button>
+        <button id="btn-export" class="ghost">Export WAV</button>
+        <button id="btn-sessions" class="ghost">Sessions</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="tracks">
+        <div class="panel-head">
+          <h2>Tracks</h2>
+          <span class="head-actions">
+            <button id="btn-add-pc" class="mini" title="Add a PC audio track">PC</button>
+            <button id="btn-add-track" class="mini" title="Add an input track">+</button>
+          </span>
+        </div>
+        <div id="track-list" class="track-list"></div>
+        <p class="hint">Arm <b>●</b> to record; press <b>L</b> to listen without arming. PC and input tracks can be recorded or monitored together.</p>
+      </aside>
+
+      <section class="timeline">
+        <canvas id="timeline"></canvas>
+      </section>
+
+      <aside id="inspector" class="inspector"></aside>
+    </main>
+
+    <footer class="statusbar">
+      <span id="status">Ready</span>
+      <span id="session-info" class="muted"></span>
+    </footer>
+  </div>
+
+  <div id="picker" class="overlay">
+    <div class="card">
+      <h1>gorecord</h1>
+      <p class="lead">Record a mic or guitar, layer takes against them, and keep the idea in this browser.</p>
+      <div id="session-list" class="session-list"></div>
+      <form id="new-session" class="new-session">
+        <input id="session-name-input" placeholder="New session name" maxlength="60" required>
+        <select id="session-rate" aria-label="Sample rate">
+          <option value="48000">48 kHz</option>
+          <option value="44100">44.1 kHz</option>
+        </select>
+        <button type="submit">New session</button>
+      </form>
+      <p class="hint">Your browser asks for microphone access the first time you record or monitor an input. Audio stays on this device.</p>
+      <p class="card-links">
+        <a href="index.html" target="_blank" rel="noreferrer">About gorecord</a>
+        <a href="https://github.com/fanama" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </p>
+    </div>
+  </div>
+
+  <script src="wasm_exec.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

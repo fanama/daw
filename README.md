@@ -42,6 +42,13 @@ packaging/macos/   Info.plist for the double-clickable app bundle
   20 Hz, 100 Hz, 1 kHz, 6 kHz and 20 kHz. The chain is heard on live monitoring
   and on the playback of recorded takes, but it is never printed into a take.
   PC audio is monitored and played back dry.
+- Download a track's monitor effects as a JSON preset and load one back. A
+  loaded preset is merged over the current chain, then clamped by the core.
+  Built-in presets cover electric, acoustic and classical guitar, bass, lead
+  and backing vocals, and spoken word, with their EQ bands placed at 60 Hz,
+  250 Hz, 1 kHz, 4 kHz and 12 kHz.
+- Reverb uses a synthesized stereo room with early reflections and a damping
+  control that darkens the tail as it decays; wet and dry use an equal-power mix.
 - Per-track monitor volume fader and pan knob: they change what monitoring
   and take playback sound like, but they are not printed into takes or the
 exported WAV. Drag the knob up or down to pan, double-click it to centre.
@@ -239,7 +246,7 @@ audible mix; mute, solo, active takes, take gain and trim are already applied.
   discontinuity that no resampling can reconstruct.
 - No comping, MIDI, plugin hosting or time-stretch.
 - Reverb and amp are musically simple by design (no IR cabinet, no neural
-  models).
+  models). The reverb is algorithmic, not a sampled room.
 - The Freebuff deployment is a static site: no server-side project storage,
   accounts, collaboration or background processing. It needs Go in the build
   workspace because the WASM core is compiled at publish time.

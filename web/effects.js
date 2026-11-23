@@ -1,16 +1,21 @@
 // Web Audio translation of the desktop chain, in the same fixed order:
-// amp (drive + tone) -> cabinet -> 3-band EQ -> compressor -> reverb.
+// amp (drive + tone) -> cabinet -> five-band EQ -> compressor -> reverb.
 
 function decibels(value) {
   return Math.pow(10, value / 20);
 }
 
+function clamp(value, min, max) {
+  const number = Number(value);
+  return Math.min(max, Math.max(min, Number.isFinite(number) ? number : 0));
+}
+
 function biquad(context, type, frequency, q, gainDB) {
   const filter = context.createBiquadFilter();
   filter.type = type;
-  filter.frequency.value = frequency;
-  filter.Q.value = q;
-  filter.gain.value = gainDB;
+  filter.frequency.value = Math.min(context.sampleRate * 0.49, Math.max(10, Number(frequency) || 1000));
+  filter.Q.value = Math.max(0.0001, Number(q) || 0.7);
+  filter.gain.value = Number.isFinite(gainDB) ? gainDB : 0;
   return filter;
 }
 
@@ -25,21 +30,113 @@ function driveCurve(drive) {
   return curve;
 }
 
-function reverbImpulse(context, size, damp) {
-  const seconds = 0.35 + size * 2.6;
-  const length = Math.max(1, Math.floor(context.sampleRate * seconds));
-  const impulse = context.createBuffer(2, length, context.sampleRate);
-  for (let channel = 0; channel < 2; channel++) {
-    const data = impulse.getChannelData(channel);
-    let filtered = 0;
+// Deterministic noise keeps an impulse identical across rebuilds, so changing
+// another effect does not slightly alter the room. The tail is filtered more
+// as it decays, which is what makes high damping sound like a soft room rather
+// than simply a shorter one.
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// reverbImpulseData builds two decorrelated channels: a short cluster of early
+// reflections followed by a damped diffuse tail. The result is peak-normalised
+// so every room size reaches the convolver at a comparable level.
+export function reverbImpulseData(sampleRate, size, damp) {
+  const rate = Math.max(8000, Number(sampleRate) || 48000);
+  const room = clamp(size, 0, 1);
+  const damping = clamp(damp, 0, 1);
+  const length = Math.max(1, Math.round(rate * (0.4 + room * 2.6)));
+  const channels = [new Float32Array(length), new Float32Array(length)];
+  const roomScale = 0.7 + room * 1.1;
+  const early = [
+    [0.007, 0.38],
+    [0.013, -0.26],
+    [0.021, 0.2],
+    [0.032, -0.14],
+    [0.047, 0.09],
+    [0.068, -0.06],
+  ];
+  const fadeLength = Math.max(1, Math.round(rate * 0.006));
+  const coefficientBlock = 32;
+
+  for (let channel = 0; channel < channels.length; channel++) {
+    const data = channels[channel];
+    const random = seededRandom(
+      0x9e3779b9 ^ Math.round(room * 1000) ^ (Math.round(damping * 1000) << 10) ^ (channel * 0x85ebca6b),
+    );
+    for (let tap = 0; tap < early.length; tap++) {
+      const [time, gain] = early[tap];
+      const offset = Math.round((time * roomScale + channel * 0.0017 + tap * 0.0003) * rate);
+      if (offset < length) data[offset] += gain;
+    }
+
+    let lowpassed = 0;
+    let dcBlocked = 0;
+    let coefficient = 0.5;
     for (let index = 0; index < length; index++) {
-      const decay = Math.pow(1 - index / length, 1 + damp * 3);
-      const noise = (Math.random() * 2 - 1) * decay;
-      filtered = filtered * 0.4 + noise * 0.6;
-      data[index] = filtered;
+      if (index % coefficientBlock === 0) {
+        const progress = index / length;
+        const cutoff = 16000 * Math.pow(1 - progress, 0.35 + damping * 1.8) + 500;
+        coefficient = 1 - Math.exp((-2 * Math.PI * cutoff) / rate);
+      }
+      const noise = random() * 2 - 1;
+      lowpassed += coefficient * (noise - lowpassed);
+      dcBlocked += 0.002 * (lowpassed - dcBlocked);
+      const decay = Math.pow(1 - index / length, 1.4 + damping * 2.2);
+      const fade = Math.min(1, index / fadeLength);
+      data[index] += (lowpassed - dcBlocked) * decay * fade;
     }
   }
-  return impulse;
+
+  let peak = 0;
+  for (const data of channels) {
+    for (let index = 0; index < length; index++) {
+      const magnitude = Math.abs(data[index]);
+      if (magnitude > peak) peak = magnitude;
+    }
+  }
+  const scale = peak > 0 ? 0.9 / peak : 1;
+  if (scale !== 1) {
+    for (const data of channels) {
+      for (let index = 0; index < length; index++) data[index] *= scale;
+    }
+  }
+  return channels;
+}
+
+const REVERB_CACHE_LIMIT = 8;
+const reverbCaches = new WeakMap();
+
+// A convolver buffer depends only on the sample rate and the quantised size and
+// damping, so tracks share it and dragging a slider does not rebuild the room.
+function reverbImpulse(context, size, damp) {
+  const room = Math.round(clamp(size, 0, 1) * 100);
+  const damping = Math.round(clamp(damp, 0, 1) * 100);
+  let cache = reverbCaches.get(context);
+  if (!cache) {
+    cache = new Map();
+    reverbCaches.set(context, cache);
+  }
+  const key = `${room}:${damping}`;
+  const hit = cache.get(key);
+  if (hit) {
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
+  }
+  const channels = reverbImpulseData(context.sampleRate, room / 100, damping / 100);
+  const buffer = context.createBuffer(channels.length, channels[0].length, context.sampleRate);
+  channels.forEach((data, channel) => buffer.getChannelData(channel).set(data));
+  cache.set(key, buffer);
+  while (cache.size > REVERB_CACHE_LIMIT) cache.delete(cache.keys().next().value);
+  return buffer;
 }
 
 // buildEffectsChain returns a node with one input and one output. Callers
@@ -108,11 +205,13 @@ export function buildEffectsChain(context, effects) {
 
   if (effects.Reverb?.Enabled) {
     const reverb = effects.Reverb;
+    const mix = clamp(reverb.Mix, 0, 1);
     const dry = context.createGain();
-    dry.gain.value = 1;
     const wet = context.createGain();
-    wet.gain.value = reverb.Mix;
-    dry.gain.value = Math.max(0.2, 1 - reverb.Mix * 0.3);
+    // Equal-power crossfade keeps the perceived level steady across the mix
+    // range instead of letting dry and wet add up past unity.
+    dry.gain.value = Math.cos((mix * Math.PI) / 2);
+    wet.gain.value = Math.sin((mix * Math.PI) / 2);
     const preDelay = context.createDelay(0.2);
     preDelay.delayTime.value = reverb.PreDelayMs / 1000;
     const convolver = context.createConvolver();

@@ -6,6 +6,8 @@ import { AudioEngine } from "./audio.js";
 import { computePeaks, drawTimeline, frameAtX, markerAtX } from "./waveform.js";
 import { audibleTakes, formatDuration, takeLength } from "./model.js";
 import { effectGraph } from "./fxgraph.js";
+import { effectsFromPreset, effectsToPreset } from "./effects-preset.js";
+import { FACTORY_PRESETS } from "./effects-factory-presets.js";
 
 const App = {
   state: null,
@@ -535,11 +537,90 @@ async function normalizeTake(take) {
 
 function effectsSection(track) {
   const section = element("div");
-  section.append(element("h3", "", "Monitor effects"));
+  const head = element("div", "fx-heading");
+  head.append(element("h3", "", "Monitor effects"));
+  const actions = element("span", "fx-actions");
+  const file = document.createElement("input");
+  file.type = "file";
+  file.accept = "application/json,.json";
+  file.hidden = true;
+  const load = element("button", "", "Load");
+  load.type = "button";
+  load.title = "Load an effects preset from a JSON file";
+  load.addEventListener("click", () => {
+    file.value = "";
+    file.click();
+  });
+  file.addEventListener("change", () => {
+    const selected = file.files?.[0];
+    if (selected) loadEffectsPreset(track, selected);
+  });
+  const save = element("button", "", "Download");
+  save.type = "button";
+  save.title = "Download these monitor effects as a JSON preset";
+  save.addEventListener("click", () => downloadEffects(track));
+  actions.append(load, save);
+  head.append(actions, file);
+  section.append(head, presetPicker(track));
   for (const [title, key, controls] of EFFECT_BLOCKS) {
     section.append(effectBlock(track, title, key, controls));
   }
   return section;
+}
+
+function downloadEffects(track) {
+  try {
+    const preset = effectsToPreset(track.effects);
+    download(`${track.name}-effects.json`, JSON.stringify(preset, null, 2), "application/json", ".json");
+    setStatus(`Downloaded ${track.name} effects`);
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+function presetPicker(track) {
+  const row = element("label", "fx-presets");
+  row.append(element("span", "", "Preset"));
+  const select = document.createElement("select");
+  select.append(new Option("Choose a preset…", ""));
+  const groups = new Map();
+  for (const entry of FACTORY_PRESETS) {
+    let group = groups.get(entry.group);
+    if (!group) {
+      group = document.createElement("optgroup");
+      group.label = entry.group;
+      groups.set(entry.group, group);
+      select.append(group);
+    }
+    group.append(new Option(entry.name, entry.name));
+  }
+  select.addEventListener("change", () => {
+    const entry = FACTORY_PRESETS.find((candidate) => candidate.name === select.value);
+    select.value = "";
+    if (entry) applyEffectsPreset(track, entry.preset, `Applied ${entry.name} preset`);
+  });
+  row.append(select);
+  return row;
+}
+
+async function applyEffectsPreset(track, preset, message) {
+  try {
+    const effects = effectsFromPreset(preset, track.effects);
+    const result = await dispatch("track.effects", { trackId: track.id, effects });
+    if (result) setStatus(message);
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+async function loadEffectsPreset(track, file) {
+  let preset;
+  try {
+    preset = JSON.parse(await file.text());
+  } catch (error) {
+    return setStatus("That file is not valid JSON.", "error");
+  }
+  await applyEffectsPreset(track, preset, `Loaded ${track.name} effects from ${file.name}`);
 }
 
 function effectBlock(track, title, key, controls) {
@@ -574,7 +655,7 @@ function effectBlock(track, title, key, controls) {
 
 function effectRow(track, key, label, path, min, max, step, graph) {
   const row = element("div", "fx-row");
-  row.append(element("span", "", label));
+  row.append(element("span", "", effectLabel(track, key, path, label)));
   const slider = document.createElement("input");
   slider.type = "range";
   slider.min = min;
@@ -616,6 +697,19 @@ function writePath(object, path, value) {
 
 function formatEffectValue(value, span) {
   return span <= 2 ? value.toFixed(2) : value.toFixed(1);
+}
+
+// Presets may move the EQ bands, so the slider label follows the track's
+// actual band frequency instead of the default 20 / 100 / 1k / 6k / 20k text.
+function effectLabel(track, key, path, fallback) {
+  if (key !== "EQ") return fallback;
+  const match = /^Bands\.(\d+)\./.exec(path);
+  if (!match) return fallback;
+  const frequency = Number(track.effects.EQ?.Bands?.[Number(match[1])]?.FrequencyHz);
+  if (!Number.isFinite(frequency) || frequency <= 0) return fallback;
+  if (frequency < 1000) return String(Math.round(frequency));
+  const thousands = frequency / 1000;
+  return `${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}k`;
 }
 
 function renderTransport() {
@@ -1037,12 +1131,12 @@ async function exportMix() {
   }
 }
 
-function download(name, bytes) {
+function download(name, data, type = "audio/wav", extension = ".wav") {
   const safe = name.replace(/[\\/:*?"<>|]+/g, "-");
-  const url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+  const url = URL.createObjectURL(new Blob([data], { type }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = safe.toLowerCase().endsWith(".wav") ? safe : `${safe}.wav`;
+  link.download = safe.toLowerCase().endsWith(extension) ? safe : `${safe}${extension}`;
   document.body.append(link);
   link.click();
   link.remove();

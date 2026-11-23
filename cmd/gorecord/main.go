@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	appPath       = "/app.html"
 	livePath      = "/__gorecord/events"
 	liveGrace     = 2 * time.Second
 	liveHeartbeat = 15 * time.Second
@@ -71,11 +72,13 @@ func waitForExit(done, quit <-chan struct{}) {
 	}
 }
 
-func openWindow(mode, url, browserPath string) <-chan struct{} {
+func openWindow(mode, baseURL, browserPath string) <-chan struct{} {
+	url := baseURL
 	if mode != "none" {
-		// The page keeps an SSE connection open only for this launcher. A static
-		// deployment has no such endpoint and must not retry it.
-		url += "?desktop=1"
+		// The site root is the welcome page; the app window and tab open the
+		// recorder directly. The page keeps an SSE connection open only for this
+		// launcher. A static deployment has no such endpoint and must not retry it.
+		url = strings.TrimRight(url, "/") + appPath + "?desktop=1"
 	}
 	switch mode {
 	case "none":
@@ -127,7 +130,7 @@ func resolveWebDir(configured string) (string, error) {
 // requireBuild checks the generated files before the server starts, so a
 // missing wasm build fails with a build hint instead of a blank page.
 func requireBuild(root string) error {
-	for _, name := range []string{"index.html", "gorecord.wasm", "wasm_exec.js"} {
+	for _, name := range []string{"index.html", "app.html", "gorecord.wasm", "wasm_exec.js"} {
 		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
 			return fmt.Errorf("%s is missing from %s", name, root)
 		}
