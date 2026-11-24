@@ -2,7 +2,7 @@
 // renders it, runs the Web Audio transport, and persists audio in IndexedDB.
 
 import * as storage from "./storage.js";
-import { AudioEngine } from "./audio.js";
+import { AudioEngine, encodeWav, renderMixdown } from "./audio.js";
 import { clipAt, computePeaks, drawTimeline, frameAtX, markerAtX } from "./waveform.js";
 import { audibleTakes, formatDuration, takeLength } from "./model.js";
 import { effectGraph } from "./fxgraph.js";
@@ -35,6 +35,8 @@ const App = {
   eqTrackId: null,
   compGraph: null,
   compTrackId: null,
+  openEffects: new Set(),
+  openTakes: new Set(),
   outputs: [],
   outputIds: [""],
   outputPreference: [""],
@@ -52,12 +54,54 @@ const appLive = new URLSearchParams(window.location.search).has("desktop")
   : null;
 if (appLive) appLive.onerror = () => {};
 
-const EFFECT_BLOCKS = [
-  ["Amp", "Amp", [["Drive", "Drive", 0, 1, 0.01], ["Level", "LevelDB", -24, 6, 0.5], ["Bass", "BassDB", -12, 12, 0.5], ["Mid", "MidDB", -12, 12, 0.5], ["Treble", "TrebleDB", -12, 12, 0.5]]],
-  ["Cabinet", "Cab", [["Character", "Character", 0, 1, 0.01]]],
-  ["Equalizer", "EQ", [["20", "Bands.0.GainDB", -24, 24, 0.5], ["100", "Bands.1.GainDB", -24, 24, 0.5], ["1k", "Bands.2.GainDB", -24, 24, 0.5], ["6k", "Bands.3.GainDB", -24, 24, 0.5], ["20k", "Bands.4.GainDB", -24, 24, 0.5]]],
-  ["Compressor", "Comp", [["Threshold", "ThresholdDB", -60, 0, 1], ["Ratio", "Ratio", 1, 20, 0.5], ["Makeup", "MakeupDB", 0, 24, 0.5]]],
-  ["Reverb", "Reverb", [["Size", "Size", 0, 1, 0.01], ["Damp", "Damp", 0, 1, 0.01], ["Mix", "Mix", 0, 1, 0.01]]],
+// One entry per effect kind the chain can hold. "state" is the settings block
+// name the core sends back, so a chain can hold several instances of a kind.
+const EFFECT_KINDS = [
+  {
+    kind: "amp",
+    state: "Amp",
+    title: "Amp",
+    controls: [
+      ["Drive", "Drive", 0, 1, 0.01],
+      ["Level", "LevelDB", -24, 6, 0.5],
+      ["Bass", "BassDB", -12, 12, 0.5],
+      ["Mid", "MidDB", -12, 12, 0.5],
+      ["Treble", "TrebleDB", -12, 12, 0.5],
+    ],
+  },
+  { kind: "cab", state: "Cab", title: "Cabinet", controls: [["Character", "Character", 0, 1, 0.01]] },
+  {
+    kind: "eq",
+    state: "EQ",
+    title: "Equalizer",
+    controls: [
+      ["20", "Bands.0.GainDB", -24, 24, 0.5],
+      ["100", "Bands.1.GainDB", -24, 24, 0.5],
+      ["1k", "Bands.2.GainDB", -24, 24, 0.5],
+      ["6k", "Bands.3.GainDB", -24, 24, 0.5],
+      ["20k", "Bands.4.GainDB", -24, 24, 0.5],
+    ],
+  },
+  {
+    kind: "comp",
+    state: "Comp",
+    title: "Compressor",
+    controls: [
+      ["Threshold", "ThresholdDB", -60, 0, 1],
+      ["Ratio", "Ratio", 1, 20, 0.5],
+      ["Makeup", "MakeupDB", 0, 24, 0.5],
+    ],
+  },
+  {
+    kind: "reverb",
+    state: "Reverb",
+    title: "Reverb",
+    controls: [
+      ["Size", "Size", 0, 1, 0.01],
+      ["Damp", "Damp", 0, 1, 0.01],
+      ["Mix", "Mix", 0, 1, 0.01],
+    ],
+  },
 ];
 
 function element(tag, className = "", text = "") {
@@ -560,15 +604,27 @@ function renderInspector() {
 }
 
 function takesSection(track) {
-  const section = element("div");
-  section.append(element("h3", "", "Take stack"));
+  const details = document.createElement("details");
+  details.className = "takes";
+  details.open = App.openTakes.has(track.id);
+  details.addEventListener("toggle", () => {
+    if (details.open) App.openTakes.add(track.id);
+    else App.openTakes.delete(track.id);
+  });
   const takes = App.state.takes.filter((take) => take.trackId === track.id);
+  const summary = document.createElement("summary");
+  summary.className = "section-toggle";
+  summary.append(
+    element("span", "section-title", "Take stack"),
+    element("span", "section-meta", `${takes.length} take${takes.length === 1 ? "" : "s"}`),
+  );
+  details.append(summary);
   if (!takes.length) {
-    section.append(element("p", "empty", "No takes yet."));
-    return section;
+    details.append(element("p", "empty", "No takes yet."));
+    return details;
   }
-  takes.forEach((take, index) => section.append(takeRow(track, take, index)));
-  return section;
+  takes.forEach((take, index) => details.append(takeRow(track, take, index)));
+  return details;
 }
 
 function takeRow(track, take, index) {
@@ -672,11 +728,36 @@ function effectsSection(track) {
   save.addEventListener("click", () => downloadEffects(track));
   actions.append(load, save);
   head.append(actions, file);
-  section.append(head, presetPicker(track));
-  for (const [title, key, controls] of EFFECT_BLOCKS) {
-    section.append(effectBlock(track, title, key, controls));
+  section.append(head, presetPicker(track), addEffectControl(track));
+  const chain = Array.isArray(track.effects?.Chain) ? track.effects.Chain : [];
+  if (!chain.length) {
+    section.append(element("p", "empty", "No effects on this track. Add one above."));
+    return section;
   }
+  const ordinals = new Map();
+  chain.forEach((effect, index) => {
+    const kind = String(effect?.Kind || "");
+    const ordinal = ordinals.get(kind) || 0;
+    ordinals.set(kind, ordinal + 1);
+    section.append(effectBlock(track, effect, index, chain.length, ordinal));
+  });
   return section;
+}
+
+function addEffectControl(track) {
+  const row = element("div", "fx-add");
+  row.append(element("span", "", "Add"));
+  const select = document.createElement("select");
+  select.append(new Option("Choose an effect…", ""));
+  for (const entry of EFFECT_KINDS) select.append(new Option(entry.title, entry.kind));
+  const add = element("button", "", "Add");
+  add.type = "button";
+  add.addEventListener("click", () => {
+    if (!select.value) return;
+    dispatch("track.effect.add", { trackId: track.id, kind: select.value });
+  });
+  row.append(select, add);
+  return row;
 }
 
 function downloadEffects(track) {
@@ -734,57 +815,97 @@ async function loadEffectsPreset(track, file) {
   await applyEffectsPreset(track, preset, `Loaded ${track.name} effects from ${file.name}`);
 }
 
-function effectBlock(track, title, key, controls) {
-  const block = element("div", "fx");
-  const head = document.createElement("label");
-  head.className = "fx-head";
+function effectBlock(track, effect, index, count, ordinal) {
+  const kind = String(effect?.Kind || "");
+  const spec = EFFECT_KINDS.find((entry) => entry.kind === kind);
+  const block = document.createElement("details");
+  block.className = "fx";
+  if (!spec) return block;
+  const settings = effect[spec.state] || {};
+  const key = `${track.id}:${kind}:${ordinal}`;
+  block.open = App.openEffects.has(key);
+  block.addEventListener("toggle", () => {
+    if (block.open) App.openEffects.add(key);
+    else App.openEffects.delete(key);
+  });
+  const head = document.createElement("summary");
+  head.className = "fx-head section-toggle";
   const toggle = document.createElement("input");
   toggle.type = "checkbox";
-  toggle.checked = Boolean(track.effects[key]?.Enabled);
+  toggle.title = `Enable ${spec.title}`;
+  toggle.checked = Boolean(settings.Enabled);
+  // Keep the checkbox and the buttons plain controls: clicking one must not
+  // fold the block.
+  toggle.addEventListener("click", (event) => event.stopPropagation());
   toggle.addEventListener("change", () => {
     const effects = cloneEffects(track.effects);
-    effects[key].Enabled = toggle.checked;
+    effects.Chain[index][spec.state].Enabled = toggle.checked;
     dispatch("track.effects", { trackId: track.id, effects });
   });
-  head.append(toggle, document.createTextNode(title));
+  const actions = element("span", "fx-item-actions");
+  actions.append(
+    itemButton("▲", "Move this effect earlier", index === 0, () => {
+      dispatch("track.effect.move", { trackId: track.id, from: index, to: index - 1 });
+    }),
+    itemButton("▼", "Move this effect later", index === count - 1, () => {
+      dispatch("track.effect.move", { trackId: track.id, from: index, to: index + 1 });
+    }),
+    itemButton("×", "Remove this effect", false, () => {
+      dispatch("track.effect.remove", { trackId: track.id, index });
+    }),
+  );
+  head.append(toggle, element("span", "section-title", spec.title), actions, element("span", "fx-chevron"));
   block.append(head);
-  const graph = effectGraph(key, track.effects[key], App.state.sampleRate);
+  const graphKey = spec.kind === "eq" ? "EQ" : spec.kind === "comp" ? "Comp" : "";
+  const graph = effectGraph(graphKey, settings, App.state.sampleRate);
   if (graph) block.append(graph.element);
-  if (graph && key === "EQ") {
+  if (graph && spec.kind === "eq") {
     App.eqGraph = graph;
     App.eqTrackId = track.id;
   }
-  if (graph && key === "Comp") {
+  if (graph && spec.kind === "comp") {
     App.compGraph = graph;
     App.compTrackId = track.id;
   }
-  for (const [label, path, min, max, step] of controls) {
-    block.append(effectRow(track, key, label, path, min, max, step, graph));
+  for (const [label, path, min, max, step] of spec.controls) {
+    block.append(effectRow(track, effect, index, spec, label, path, min, max, step, graph));
   }
   return block;
 }
 
-function effectRow(track, key, label, path, min, max, step, graph) {
+function itemButton(text, title, disabled, handler) {
+  const button = element("button", "", text);
+  button.type = "button";
+  button.title = title;
+  button.disabled = disabled;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!button.disabled) handler();
+  });
+  return button;
+}
+
+function effectRow(track, effect, index, spec, label, path, min, max, step, graph) {
   const row = element("div", "fx-row");
-  row.append(element("span", "", effectLabel(track, key, path, label)));
+  row.append(element("span", "", effectLabel(effect, spec, path, label)));
   const slider = document.createElement("input");
   slider.type = "range";
   slider.min = min;
   slider.max = max;
   slider.step = step;
-  const current = Number(readPath(track.effects[key], path));
+  const current = Number(readPath(effect[spec.state] || {}, path));
   slider.value = Number.isFinite(current) ? current : min;
   const value = element("span", "value", formatEffectValue(Number(slider.value), max - min));
   slider.addEventListener("input", () => {
     value.textContent = formatEffectValue(Number(slider.value), max - min);
     if (!graph) return;
     const preview = cloneEffects(track.effects);
-    writePath(preview[key], path, Number(slider.value));
-    graph.update(preview[key]);
+    writePath(preview.Chain[index][spec.state], path, Number(slider.value));
+    graph.update(preview.Chain[index][spec.state]);
   });
   slider.addEventListener("change", () => {
     const effects = cloneEffects(track.effects);
-    writePath(effects[key], path, Number(slider.value));
+    writePath(effects.Chain[index][spec.state], path, Number(slider.value));
     dispatch("track.effects", { trackId: track.id, effects });
   });
   row.append(slider, value);
@@ -810,13 +931,13 @@ function formatEffectValue(value, span) {
   return span <= 2 ? value.toFixed(2) : value.toFixed(1);
 }
 
-// Presets may move the EQ bands, so the slider label follows the track's
+// Presets may move the EQ bands, so the slider label follows the instance's
 // actual band frequency instead of the default 20 / 100 / 1k / 6k / 20k text.
-function effectLabel(track, key, path, fallback) {
-  if (key !== "EQ") return fallback;
+function effectLabel(effect, spec, path, fallback) {
+  if (spec.state !== "EQ") return fallback;
   const match = /^Bands\.(\d+)\./.exec(path);
   if (!match) return fallback;
-  const frequency = Number(track.effects.EQ?.Bands?.[Number(match[1])]?.FrequencyHz);
+  const frequency = Number(effect.EQ?.Bands?.[Number(match[1])]?.FrequencyHz);
   if (!Number.isFinite(frequency) || frequency <= 0) return fallback;
   if (frequency < 1000) return String(Math.round(frequency));
   const thousands = frequency / 1000;
@@ -1346,22 +1467,16 @@ async function exportMix() {
   const selection = audibleTakes(App.state);
   if (!selection.length) return setStatus("Nothing to export: select an audible take first.", "error");
   for (const { take } of selection) {
-    const audio = App.pcm.get(take.file);
-    if (!audio) return setStatus(`Missing audio for ${take.file}.`, "error");
-    registerPCM(take.file, audio);
+    if (!App.pcm.get(take.file)) return setStatus(`Missing audio for ${take.file}.`, "error");
   }
   setStatus("Rendering the mix…", "busy");
   await nextPaint();
   try {
-    const result = coreRequest("export");
-    const bytes = window.fanamixExportWAV();
-    if (!bytes) throw new Error("The mix could not be rendered.");
-    download(`${App.state.name}.wav`, bytes);
-    setStatus(`Exported ${formatDuration(result.frames / App.state.sampleRate)}`);
+    const buffer = await renderMixdown(App.state, App.pcm);
+    download(`${App.state.name}.wav`, encodeWav(buffer));
+    setStatus(`Exported ${formatDuration(buffer.length / buffer.sampleRate)}`);
   } catch (error) {
     setStatus(error.message, "error");
-  } finally {
-    for (const { take } of selection) window.fanamixClearPCM(take.file);
   }
 }
 

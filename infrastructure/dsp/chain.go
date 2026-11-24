@@ -6,25 +6,34 @@ import (
 	"fanamix/domain/mix"
 )
 
-// Chain is the per-input-channel effect chain. Parameter changes arrive
-// through an atomic pointer and are applied at block boundaries, so the audio
-// thread never locks or allocates.
+// Chain is the per-input-channel effect chain. It keeps one preallocated stage
+// slot per chain position, so reordering effects or repeating a kind never
+// allocates on the audio thread.
 type Chain struct {
-	sampleRate int
-	pending    atomic.Pointer[mix.Effects]
-	applied    mix.Effects
-	hasApplied bool
-	amp        driveStage
-	cab        cabStage
-	eq         eqStage
-	comp       compressorStage
-	reverb     reverbStage
+	sampleRate  int
+	pending     atomic.Pointer[mix.Effects]
+	applied     *mix.Effects
+	slots       [mix.MaxEffectInstances]chainSlot
+	active      [mix.MaxEffectInstances]int
+	order       [mix.MaxEffectInstances]mix.EffectKind
+	activeCount int
+	compSlot    int
+}
+
+// chainSlot holds every stage a single chain position could need. Only the
+// stage matching the position's effect kind is configured and processed.
+type chainSlot struct {
+	amp    driveStage
+	cab    cabStage
+	eq     eqStage
+	comp   compressorStage
+	reverb reverbStage
 }
 
 // NewChain returns a chain with the default effect settings.
 func NewChain() *Chain {
 	defaults := mix.DefaultEffects()
-	chain := &Chain{}
+	chain := &Chain{compSlot: -1}
 	chain.pending.Store(&defaults)
 	return chain
 }
@@ -32,51 +41,107 @@ func NewChain() *Chain {
 // Prepare allocates delay memory and applies the pending settings.
 func (c *Chain) Prepare(sampleRate int) {
 	c.sampleRate = sampleRate
-	c.reverb.prepare(sampleRate)
-	c.hasApplied = false
+	for index := range c.slots {
+		c.slots[index].reverb.prepare(sampleRate)
+	}
+	c.applied = nil
 	c.applyPending()
 }
 
-// SetEffects publishes a new configuration for the next block.
+// SetEffects publishes a new chain for the next block.
 func (c *Chain) SetEffects(effects mix.Effects) {
 	normalized := effects.Normalize()
 	c.pending.Store(&normalized)
 }
 
-// ProcessMono filters one mono block in place.
+// ProcessMono filters one mono block in place, in chain order.
 func (c *Chain) ProcessMono(samples []float32) {
 	c.applyPending()
-	c.amp.processMono(samples)
-	c.cab.processMono(samples)
-	c.eq.processMono(samples)
-	c.comp.processMono(samples)
-	c.reverb.processMono(samples)
+	for index := 0; index < c.activeCount; index++ {
+		slot := &c.slots[c.active[index]]
+		switch c.order[index] {
+		case mix.EffectAmp:
+			slot.amp.processMono(samples)
+		case mix.EffectCab:
+			slot.cab.processMono(samples)
+		case mix.EffectEQ:
+			slot.eq.processMono(samples)
+		case mix.EffectComp:
+			slot.comp.processMono(samples)
+		case mix.EffectReverb:
+			slot.reverb.processMono(samples)
+		}
+	}
 }
 
 // GainReductionDB reports the compressor gain reduction of the last block.
-func (c *Chain) GainReductionDB() float32 { return c.comp.gainReduction() }
+func (c *Chain) GainReductionDB() float32 {
+	if c.compSlot < 0 {
+		return 0
+	}
+	return c.slots[c.compSlot].comp.gainReduction()
+}
 
 // Reset clears every filter and delay line.
 func (c *Chain) Reset() {
-	c.amp.reset()
-	c.cab.reset()
-	c.eq.reset()
-	c.comp.reset()
-	c.reverb.reset()
+	for index := range c.slots {
+		c.slots[index].amp.reset()
+		c.slots[index].cab.reset()
+		c.slots[index].eq.reset()
+		c.slots[index].comp.reset()
+		c.slots[index].reverb.reset()
+	}
 }
 
 func (c *Chain) applyPending() {
 	pending := c.pending.Load()
-	if pending == nil || (c.hasApplied && *pending == c.applied) {
+	if pending == nil || pending == c.applied {
 		return
 	}
-	c.applied = *pending
-	c.hasApplied = true
-	c.amp.configure(c.sampleRate, c.applied.Amp)
-	c.cab.configure(c.sampleRate, c.applied.Cab)
-	c.eq.configure(c.sampleRate, c.applied.EQ)
-	c.comp.configure(c.sampleRate, c.applied.Comp)
-	c.reverb.configure(c.applied.Reverb)
+	c.applied = pending
+	c.activeCount = 0
+	c.compSlot = -1
+	for index, effect := range pending.Chain {
+		if index >= len(c.slots) {
+			break
+		}
+		slot := &c.slots[index]
+		switch effect.Kind {
+		case mix.EffectAmp:
+			if effect.Amp == nil {
+				continue
+			}
+			slot.amp.configure(c.sampleRate, *effect.Amp)
+		case mix.EffectCab:
+			if effect.Cab == nil {
+				continue
+			}
+			slot.cab.configure(c.sampleRate, *effect.Cab)
+		case mix.EffectEQ:
+			if effect.EQ == nil {
+				continue
+			}
+			slot.eq.configure(c.sampleRate, *effect.EQ)
+		case mix.EffectComp:
+			if effect.Comp == nil {
+				continue
+			}
+			slot.comp.configure(c.sampleRate, *effect.Comp)
+			if effect.Comp.Enabled {
+				c.compSlot = index
+			}
+		case mix.EffectReverb:
+			if effect.Reverb == nil {
+				continue
+			}
+			slot.reverb.configure(*effect.Reverb)
+		default:
+			continue
+		}
+		c.active[c.activeCount] = index
+		c.order[c.activeCount] = effect.Kind
+		c.activeCount++
+	}
 }
 
 // Factory creates chain processors for the audio adapter.

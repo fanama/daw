@@ -26,10 +26,17 @@ func TestSaveLoadPreservesTheAggregate(t *testing.T) {
 		t.Fatalf("add track: %v", err)
 	}
 	effects := mix.DefaultEffects()
-	effects.Amp.Drive = 0.8
-	effects.Reverb.Enabled = true
-	effects.Reverb.Mix = 0.35
-	effects.EQ.Bands[1].GainDB = -4
+	for index := range effects.Chain {
+		switch effects.Chain[index].Kind {
+		case mix.EffectAmp:
+			effects.Chain[index].Amp.Drive = 0.8
+		case mix.EffectReverb:
+			effects.Chain[index].Reverb.Enabled = true
+			effects.Chain[index].Reverb.Mix = 0.35
+		case mix.EffectEQ:
+			effects.Chain[index].EQ.Bands[1].GainDB = -4
+		}
+	}
 	if err := original.SetEffects(guitar.ID(), effects); err != nil {
 		t.Fatalf("set effects: %v", err)
 	}
@@ -59,7 +66,9 @@ func TestSaveLoadPreservesTheAggregate(t *testing.T) {
 	if len(loadedTracks) != 1 || !loadedTracks[0].IsArmed() {
 		t.Fatalf("track state lost: %+v", loadedTracks)
 	}
-	if loadedTracks[0].Effects().Amp.Drive != 0.8 || loadedTracks[0].Effects().Reverb.Mix != 0.35 {
+	amp, hasAmp := loadedTracks[0].Effects().Find(mix.EffectAmp)
+	reverb, hasReverb := loadedTracks[0].Effects().Find(mix.EffectReverb)
+	if !hasAmp || !hasReverb || amp.Amp.Drive != 0.8 || reverb.Reverb.Mix != 0.35 {
 		t.Fatalf("effects lost: %+v", loadedTracks[0].Effects())
 	}
 	loadedTakes := loaded.Takes()

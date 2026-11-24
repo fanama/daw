@@ -477,6 +477,32 @@ button.mini {
   margin: 18px 0 8px;
 }
 
+.takes { margin-top: 18px; }
+.section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+.section-toggle::-webkit-details-marker { display: none; }
+.section-toggle::after {
+  content: "▸";
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+details[open] > .section-toggle::after { content: "▾"; }
+.takes[open] > .section-toggle { margin-bottom: 8px; }
+.section-title {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.section-meta { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
 .inspector .empty { color: var(--muted); font-size: 13px; }
 
 .take {
@@ -530,6 +556,31 @@ button.mini {
   font-weight: 560;
   cursor: pointer;
 }
+.fx .fx-head .section-title { font-weight: 560; }
+.fx-head::after { content: none; }
+.fx-chevron { color: var(--muted); font-size: 10px; }
+.fx-chevron::before { content: "▸"; }
+.fx[open] > .fx-head .fx-chevron::before { content: "▾"; }
+.fx-item-actions { margin-left: auto; display: flex; gap: 2px; }
+.fx-item-actions button {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--muted);
+}
+.fx-item-actions button:disabled { opacity: 0.35; cursor: default; }
+.fx-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.fx-add select { flex: 1; min-width: 0; padding: 4px 6px; font-size: 11px; }
+.fx-add button { padding: 4px 10px; font-size: 11px; }
 .fx-row {
   display: grid;
   grid-template-columns: 62px 1fr 46px;

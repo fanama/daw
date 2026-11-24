@@ -45,53 +45,193 @@ type reverbJSON struct {
 	PreDelayMs float64 `json:"preDelayMs"`
 }
 
+// effectJSON is one chain position. Only the block matching Kind is written.
+type effectJSON struct {
+	Kind   string          `json:"kind"`
+	Amp    *ampJSON        `json:"amp,omitempty"`
+	Cab    *cabJSON        `json:"cab,omitempty"`
+	EQ     *eqJSON         `json:"eq,omitempty"`
+	Comp   *compressorJSON `json:"comp,omitempty"`
+	Reverb *reverbJSON     `json:"reverb,omitempty"`
+}
+
+// effectsJSON is a track's ordered chain. Projects written before schema 5 keep
+// the five fixed blocks at the top level; those are still read and migrated.
 type effectsJSON struct {
-	Amp    ampJSON        `json:"amp"`
-	Cab    cabJSON        `json:"cab"`
-	EQ     eqJSON         `json:"eq"`
-	Comp   compressorJSON `json:"comp"`
-	Reverb reverbJSON     `json:"reverb"`
+	Chain  []effectJSON    `json:"chain"`
+	Amp    *ampJSON        `json:"amp,omitempty"`
+	Cab    *cabJSON        `json:"cab,omitempty"`
+	EQ     *eqJSON         `json:"eq,omitempty"`
+	Comp   *compressorJSON `json:"comp,omitempty"`
+	Reverb *reverbJSON     `json:"reverb,omitempty"`
 }
 
 func effectsFromDomain(effects mix.Effects) effectsJSON {
-	bands := make([]bandJSON, 0, len(effects.EQ.Bands))
-	for _, band := range effects.EQ.Bands {
+	stored := effectsJSON{Chain: make([]effectJSON, 0, len(effects.Chain))}
+	for _, effect := range effects.Chain {
+		entry := effectJSON{Kind: string(effect.Kind)}
+		switch effect.Kind {
+		case mix.EffectAmp:
+			if effect.Amp != nil {
+				amp := ampFromDomain(*effect.Amp)
+				entry.Amp = &amp
+			}
+		case mix.EffectCab:
+			if effect.Cab != nil {
+				cab := cabFromDomain(*effect.Cab)
+				entry.Cab = &cab
+			}
+		case mix.EffectEQ:
+			if effect.EQ != nil {
+				eq := eqFromDomain(*effect.EQ)
+				entry.EQ = &eq
+			}
+		case mix.EffectComp:
+			if effect.Comp != nil {
+				comp := compressorFromDomain(*effect.Comp)
+				entry.Comp = &comp
+			}
+		case mix.EffectReverb:
+			if effect.Reverb != nil {
+				reverb := reverbFromDomain(*effect.Reverb)
+				entry.Reverb = &reverb
+			}
+		}
+		stored.Chain = append(stored.Chain, entry)
+	}
+	return stored
+}
+
+// effectsToDomain restores the chain. A nil chain means a legacy project, whose
+// five blocks are merged into the default chain; an explicit empty list means
+// the track really has no effects.
+func effectsToDomain(stored effectsJSON) mix.Effects {
+	if stored.Chain != nil {
+		chain := make([]mix.Effect, 0, len(stored.Chain))
+		for _, entry := range stored.Chain {
+			kind := mix.EffectKind(entry.Kind)
+			if !mix.ValidEffectKind(kind) {
+				continue
+			}
+			chain = append(chain, effectToDomain(kind, entry))
+		}
+		return mix.Effects{Chain: chain}.Normalize()
+	}
+	if !stored.hasLegacyBlocks() {
+		return mix.DefaultEffects()
+	}
+	effects := mix.DefaultEffects()
+	for index := range effects.Chain {
+		effect := &effects.Chain[index]
+		switch effect.Kind {
+		case mix.EffectAmp:
+			if stored.Amp != nil {
+				amp := ampToDomain(*stored.Amp)
+				effect.Amp = &amp
+			}
+		case mix.EffectCab:
+			if stored.Cab != nil {
+				cab := cabToDomain(*stored.Cab)
+				effect.Cab = &cab
+			}
+		case mix.EffectEQ:
+			if stored.EQ != nil {
+				eq := eqToDomain(*stored.EQ)
+				effect.EQ = &eq
+			}
+		case mix.EffectComp:
+			if stored.Comp != nil {
+				comp := compressorToDomain(*stored.Comp)
+				effect.Comp = &comp
+			}
+		case mix.EffectReverb:
+			if stored.Reverb != nil {
+				reverb := reverbToDomain(*stored.Reverb)
+				effect.Reverb = &reverb
+			}
+		}
+	}
+	return effects.Normalize()
+}
+
+func (e effectsJSON) hasLegacyBlocks() bool {
+	return e.Amp != nil || e.Cab != nil || e.EQ != nil || e.Comp != nil || e.Reverb != nil
+}
+
+func effectToDomain(kind mix.EffectKind, entry effectJSON) mix.Effect {
+	effect := mix.NewEffect(kind)
+	switch kind {
+	case mix.EffectAmp:
+		if entry.Amp != nil {
+			amp := ampToDomain(*entry.Amp)
+			effect.Amp = &amp
+		}
+	case mix.EffectCab:
+		if entry.Cab != nil {
+			cab := cabToDomain(*entry.Cab)
+			effect.Cab = &cab
+		}
+	case mix.EffectEQ:
+		if entry.EQ != nil {
+			eq := eqToDomain(*entry.EQ)
+			effect.EQ = &eq
+		}
+	case mix.EffectComp:
+		if entry.Comp != nil {
+			comp := compressorToDomain(*entry.Comp)
+			effect.Comp = &comp
+		}
+	case mix.EffectReverb:
+		if entry.Reverb != nil {
+			reverb := reverbToDomain(*entry.Reverb)
+			effect.Reverb = &reverb
+		}
+	}
+	return effect
+}
+
+func ampFromDomain(amp mix.Amp) ampJSON {
+	return ampJSON{
+		Enabled:  amp.Enabled,
+		Drive:    amp.Drive,
+		BassDB:   amp.BassDB,
+		MidDB:    amp.MidDB,
+		TrebleDB: amp.TrebleDB,
+		LevelDB:  amp.LevelDB,
+	}
+}
+
+func ampToDomain(stored ampJSON) mix.Amp {
+	return mix.Amp{
+		Enabled:  stored.Enabled,
+		Drive:    stored.Drive,
+		BassDB:   stored.BassDB,
+		MidDB:    stored.MidDB,
+		TrebleDB: stored.TrebleDB,
+		LevelDB:  stored.LevelDB,
+	}
+}
+
+func cabFromDomain(cab mix.Cab) cabJSON {
+	return cabJSON{Enabled: cab.Enabled, Character: cab.Character}
+}
+
+func cabToDomain(stored cabJSON) mix.Cab {
+	return mix.Cab{Enabled: stored.Enabled, Character: stored.Character}
+}
+
+func eqFromDomain(eq mix.EQ) eqJSON {
+	bands := make([]bandJSON, 0, len(eq.Bands))
+	for _, band := range eq.Bands {
 		bands = append(bands, bandJSON{FrequencyHz: band.FrequencyHz, Q: band.Q, GainDB: band.GainDB})
 	}
-	return effectsJSON{
-		Amp: ampJSON{
-			Enabled:  effects.Amp.Enabled,
-			Drive:    effects.Amp.Drive,
-			BassDB:   effects.Amp.BassDB,
-			MidDB:    effects.Amp.MidDB,
-			TrebleDB: effects.Amp.TrebleDB,
-			LevelDB:  effects.Amp.LevelDB,
-		},
-		Cab: cabJSON{Enabled: effects.Cab.Enabled, Character: effects.Cab.Character},
-		EQ:  eqJSON{Enabled: effects.EQ.Enabled, Bands: bands},
-		Comp: compressorJSON{
-			Enabled:     effects.Comp.Enabled,
-			ThresholdDB: effects.Comp.ThresholdDB,
-			Ratio:       effects.Comp.Ratio,
-			AttackMs:    effects.Comp.AttackMs,
-			ReleaseMs:   effects.Comp.ReleaseMs,
-			KneeDB:      effects.Comp.KneeDB,
-			MakeupDB:    effects.Comp.MakeupDB,
-		},
-		Reverb: reverbJSON{
-			Enabled:    effects.Reverb.Enabled,
-			Size:       effects.Reverb.Size,
-			Damp:       effects.Reverb.Damp,
-			Mix:        effects.Reverb.Mix,
-			PreDelayMs: effects.Reverb.PreDelayMs,
-		},
-	}
+	return eqJSON{Enabled: eq.Enabled, Bands: bands}
 }
 
 // eqToDomain restores the equalizer and migrates the three bands of a v1
 // project into the middle slots, leaving the 20 Hz and 20 kHz bands flat.
 func eqToDomain(stored eqJSON) mix.EQ {
-	eq := mix.DefaultEffects().EQ
+	eq := defaultEQ()
 	eq.Enabled = stored.Enabled
 	offset := 0
 	if len(stored.Bands) == 3 && len(eq.Bands) == 5 {
@@ -107,33 +247,53 @@ func eqToDomain(stored eqJSON) mix.EQ {
 	return eq
 }
 
-func effectsToDomain(stored effectsJSON) mix.Effects {
-	effects := mix.DefaultEffects()
-	effects.Amp = mix.Amp{
-		Enabled:  stored.Amp.Enabled,
-		Drive:    stored.Amp.Drive,
-		BassDB:   stored.Amp.BassDB,
-		MidDB:    stored.Amp.MidDB,
-		TrebleDB: stored.Amp.TrebleDB,
-		LevelDB:  stored.Amp.LevelDB,
+func compressorFromDomain(comp mix.Compressor) compressorJSON {
+	return compressorJSON{
+		Enabled:     comp.Enabled,
+		ThresholdDB: comp.ThresholdDB,
+		Ratio:       comp.Ratio,
+		AttackMs:    comp.AttackMs,
+		ReleaseMs:   comp.ReleaseMs,
+		KneeDB:      comp.KneeDB,
+		MakeupDB:    comp.MakeupDB,
 	}
-	effects.Cab = mix.Cab{Enabled: stored.Cab.Enabled, Character: stored.Cab.Character}
-	effects.EQ = eqToDomain(stored.EQ)
-	effects.Comp = mix.Compressor{
-		Enabled:     stored.Comp.Enabled,
-		ThresholdDB: stored.Comp.ThresholdDB,
-		Ratio:       stored.Comp.Ratio,
-		AttackMs:    stored.Comp.AttackMs,
-		ReleaseMs:   stored.Comp.ReleaseMs,
-		KneeDB:      stored.Comp.KneeDB,
-		MakeupDB:    stored.Comp.MakeupDB,
+}
+
+func compressorToDomain(stored compressorJSON) mix.Compressor {
+	return mix.Compressor{
+		Enabled:     stored.Enabled,
+		ThresholdDB: stored.ThresholdDB,
+		Ratio:       stored.Ratio,
+		AttackMs:    stored.AttackMs,
+		ReleaseMs:   stored.ReleaseMs,
+		KneeDB:      stored.KneeDB,
+		MakeupDB:    stored.MakeupDB,
 	}
-	effects.Reverb = mix.Reverb{
-		Enabled:    stored.Reverb.Enabled,
-		Size:       stored.Reverb.Size,
-		Damp:       stored.Reverb.Damp,
-		Mix:        stored.Reverb.Mix,
-		PreDelayMs: stored.Reverb.PreDelayMs,
+}
+
+func reverbFromDomain(reverb mix.Reverb) reverbJSON {
+	return reverbJSON{
+		Enabled:    reverb.Enabled,
+		Size:       reverb.Size,
+		Damp:       reverb.Damp,
+		Mix:        reverb.Mix,
+		PreDelayMs: reverb.PreDelayMs,
 	}
-	return effects.Normalize()
+}
+
+func reverbToDomain(stored reverbJSON) mix.Reverb {
+	return mix.Reverb{
+		Enabled:    stored.Enabled,
+		Size:       stored.Size,
+		Damp:       stored.Damp,
+		Mix:        stored.Mix,
+		PreDelayMs: stored.PreDelayMs,
+	}
+}
+
+func defaultEQ() mix.EQ {
+	if effect, ok := mix.DefaultEffects().Find(mix.EffectEQ); ok && effect.EQ != nil {
+		return *effect.EQ
+	}
+	return mix.EQ{}
 }

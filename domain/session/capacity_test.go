@@ -43,29 +43,48 @@ func TestCapacityRemainingDurationShrinksWithChannels(t *testing.T) {
 }
 
 func TestEffectsNormalizeClampsEveryParameter(t *testing.T) {
-	effects := mix.Effects{
-		Amp:    mix.Amp{Drive: 4, BassDB: -99, MidDB: 99, LevelDB: 50},
-		Cab:    mix.Cab{Character: -1},
-		EQ:     mix.EQ{Bands: [5]mix.EQBand{{FrequencyHz: 5, Q: 100, GainDB: 90}}},
-		Comp:   mix.Compressor{ThresholdDB: -200, Ratio: 50, AttackMs: 0, ReleaseMs: 1, KneeDB: 40, MakeupDB: 90},
-		Reverb: mix.Reverb{Size: 9, Damp: -3, Mix: 3, PreDelayMs: 900},
-	}
+	effects := mix.Effects{Chain: []mix.Effect{
+		{Kind: mix.EffectAmp, Amp: &mix.Amp{Drive: 4, BassDB: -99, MidDB: 99, LevelDB: 50}},
+		{Kind: mix.EffectCab, Cab: &mix.Cab{Character: -1}},
+		{Kind: mix.EffectEQ, EQ: &mix.EQ{Bands: [5]mix.EQBand{{FrequencyHz: 5, Q: 100, GainDB: 90}}}},
+		{Kind: mix.EffectComp, Comp: &mix.Compressor{ThresholdDB: -200, Ratio: 50, AttackMs: 0, ReleaseMs: 1, KneeDB: 40, MakeupDB: 90}},
+		{Kind: mix.EffectReverb, Reverb: &mix.Reverb{Size: 9, Damp: -3, Mix: 3, PreDelayMs: 900}},
+	}}
 	normalized := effects.Normalize()
 
-	if normalized.Amp.Drive != 1 || normalized.Amp.BassDB != -12 || normalized.Amp.MidDB != 12 {
-		t.Fatalf("amp not clamped: %+v", normalized.Amp)
+	amp, ok := normalized.Find(mix.EffectAmp)
+	if !ok || amp.Amp.Drive != 1 || amp.Amp.BassDB != -12 || amp.Amp.MidDB != 12 {
+		t.Fatalf("amp not clamped: %+v", normalized.Chain)
 	}
-	if normalized.Cab.Character != 0 {
-		t.Fatalf("cab not clamped: %+v", normalized.Cab)
+	if cab, ok := normalized.Find(mix.EffectCab); !ok || cab.Cab.Character != 0 {
+		t.Fatalf("cab not clamped: %+v", normalized.Chain)
 	}
-	if normalized.EQ.Bands[0].FrequencyHz != 20 || normalized.EQ.Bands[0].GainDB != 24 {
-		t.Fatalf("eq not clamped: %+v", normalized.EQ.Bands[0])
+	eq, ok := normalized.Find(mix.EffectEQ)
+	if !ok || eq.EQ.Bands[0].FrequencyHz != 20 || eq.EQ.Bands[0].GainDB != 24 {
+		t.Fatalf("eq not clamped: %+v", normalized.Chain)
 	}
-	if normalized.Comp.Ratio != 20 || normalized.Comp.ReleaseMs != 10 {
-		t.Fatalf("compressor not clamped: %+v", normalized.Comp)
+	comp, ok := normalized.Find(mix.EffectComp)
+	if !ok || comp.Comp.Ratio != 20 || comp.Comp.ReleaseMs != 10 {
+		t.Fatalf("compressor not clamped: %+v", normalized.Chain)
 	}
-	if normalized.Reverb.Mix != 1 || normalized.Reverb.PreDelayMs != 100 {
-		t.Fatalf("reverb not clamped: %+v", normalized.Reverb)
+	reverb, ok := normalized.Find(mix.EffectReverb)
+	if !ok || reverb.Reverb.Mix != 1 || reverb.Reverb.PreDelayMs != 100 {
+		t.Fatalf("reverb not clamped: %+v", normalized.Chain)
+	}
+}
+
+func TestEffectsKeepChainOrderAndRepeats(t *testing.T) {
+	effects := mix.Effects{Chain: []mix.Effect{
+		mix.NewEffect(mix.EffectEQ),
+		mix.NewEffect(mix.EffectAmp),
+		mix.NewEffect(mix.EffectEQ),
+	}}
+	normalized := effects.Normalize()
+	if len(normalized.Chain) != 3 {
+		t.Fatalf("normalization lost instances: %+v", normalized.Chain)
+	}
+	if normalized.Chain[0].Kind != mix.EffectEQ || normalized.Chain[1].Kind != mix.EffectAmp || normalized.Chain[2].Kind != mix.EffectEQ {
+		t.Fatalf("chain order changed: %+v", normalized.Chain)
 	}
 }
 

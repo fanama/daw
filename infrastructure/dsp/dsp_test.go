@@ -25,13 +25,8 @@ func measureGainDB(t *testing.T, chain *dsp.Chain, frequency, sampleRate float64
 }
 
 func TestEQBandAddsExpectedGain(t *testing.T) {
-	effects := mix.DefaultEffects()
-	effects.Amp.Enabled = false
-	effects.Cab.Enabled = false
-	effects.EQ.Enabled = true
-	effects.EQ.Bands[1] = mix.EQBand{FrequencyHz: 1000, Q: 1.0, GainDB: 12}
-	effects.Comp.Enabled = false
-	effects.Reverb.Enabled = false
+	effects := mix.Effects{Chain: []mix.Effect{mix.NewEffect(mix.EffectEQ)}}
+	effects.Chain[0].EQ.Bands[1] = mix.EQBand{FrequencyHz: 1000, Q: 1.0, GainDB: 12}
 
 	chain := dsp.NewChain()
 	chain.Prepare(48000)
@@ -44,14 +39,12 @@ func TestEQBandAddsExpectedGain(t *testing.T) {
 }
 
 func TestCompressorReducesLoudBlocks(t *testing.T) {
-	effects := mix.DefaultEffects()
-	effects.Amp.Enabled = false
-	effects.Cab.Enabled = false
-	effects.EQ.Enabled = false
-	effects.Reverb.Enabled = false
-	effects.Comp = mix.Compressor{
-		Enabled: true, ThresholdDB: -30, Ratio: 8, AttackMs: 1, ReleaseMs: 100, KneeDB: 2,
-	}
+	effects := mix.Effects{Chain: []mix.Effect{mix.NewEffect(mix.EffectComp)}}
+	effects.Chain[0].Comp.ThresholdDB = -30
+	effects.Chain[0].Comp.Ratio = 8
+	effects.Chain[0].Comp.AttackMs = 1
+	effects.Chain[0].Comp.ReleaseMs = 100
+	effects.Chain[0].Comp.KneeDB = 2
 	chain := dsp.NewChain()
 	chain.Prepare(48000)
 	chain.SetEffects(effects)
@@ -63,6 +56,22 @@ func TestCompressorReducesLoudBlocks(t *testing.T) {
 	chain.ProcessMono(buffer)
 	if chain.GainReductionDB() < 6 {
 		t.Fatalf("expected at least 6 dB of gain reduction, got %.2f", chain.GainReductionDB())
+	}
+}
+
+func TestChainRunsRepeatedEffectsInOrder(t *testing.T) {
+	effects := mix.Effects{Chain: []mix.Effect{mix.NewEffect(mix.EffectEQ), mix.NewEffect(mix.EffectEQ)}}
+	for index := range effects.Chain {
+		effects.Chain[index].EQ.Bands[1] = mix.EQBand{FrequencyHz: 1000, Q: 1.0, GainDB: 6}
+	}
+
+	chain := dsp.NewChain()
+	chain.Prepare(48000)
+	chain.SetEffects(effects)
+
+	gain := measureGainDB(t, chain, 1000, 48000)
+	if gain < 10 || gain > 14 {
+		t.Fatalf("expected about 12 dB from two stacked EQ bands, got %.2f dB", gain)
 	}
 }
 

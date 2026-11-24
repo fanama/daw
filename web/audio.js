@@ -1,9 +1,9 @@
-// Browser audio engine. Capture and monitoring run through the Web Audio API;
-// take audio is handed back to the Go core for persistence and export.
+// Browser audio engine. Capture, monitoring and the WAV mixdown run through the
+// same Web Audio graph; take audio is handed back to the Go core for persistence.
 
 import { buildEffectsChain } from "./effects.js";
 import { detectPitch, noteReading } from "./tuner.js";
-import { audibleTakes } from "./model.js";
+import { audibleTakes, takeLength } from "./model.js";
 import { estimateClockRatio } from "./clock.js";
 
 const BLOCK_FRAMES = 128;
@@ -41,6 +41,28 @@ function trackPan(track) {
 // its recorded takes are played back.
 function trackChain(context, track) {
   return buildEffectsChain(context, track.effects);
+}
+
+// bufferFromAudio resamples one take into a context buffer with the linear
+// interpolation used for playback and export.
+function bufferFromAudio(context, audio) {
+  const frames = Math.floor(audio.samples.length / audio.channels);
+  const rate = context.sampleRate;
+  const outputFrames = Math.max(1, Math.round((frames * rate) / audio.sampleRate));
+  const buffer = context.createBuffer(audio.channels, outputFrames, rate);
+  const step = audio.sampleRate / rate;
+  for (let channel = 0; channel < audio.channels; channel++) {
+    const target = buffer.getChannelData(channel);
+    for (let frame = 0; frame < outputFrames; frame++) {
+      const position = Math.min(frames - 1, frame * step);
+      const index = Math.floor(position);
+      const next = Math.min(frames - 1, index + 1);
+      const mix = position - index;
+      target[frame] = audio.samples[index * audio.channels + channel] * (1 - mix)
+        + audio.samples[next * audio.channels + channel] * mix;
+    }
+  }
+  return buffer;
 }
 
 export class AudioEngine {
@@ -596,22 +618,7 @@ export class AudioEngine {
   buffer(file, audio) {
     const cached = this.buffers.get(file);
     if (cached && cached.audio === audio) return cached.buffer;
-    const frames = Math.floor(audio.samples.length / audio.channels);
-    const rate = this.ctx.sampleRate;
-    const outputFrames = Math.max(1, Math.round((frames * rate) / audio.sampleRate));
-    const buffer = this.ctx.createBuffer(audio.channels, outputFrames, rate);
-    const step = audio.sampleRate / rate;
-    for (let channel = 0; channel < audio.channels; channel++) {
-      const target = buffer.getChannelData(channel);
-      for (let frame = 0; frame < outputFrames; frame++) {
-        const position = Math.min(frames - 1, frame * step);
-        const index = Math.floor(position);
-        const next = Math.min(frames - 1, index + 1);
-        const mix = position - index;
-        target[frame] = audio.samples[index * audio.channels + channel] * (1 - mix)
-          + audio.samples[next * audio.channels + channel] * mix;
-      }
-    }
+    const buffer = bufferFromAudio(this.ctx, audio);
     this.buffers.set(file, { audio, buffer });
     return buffer;
   }
@@ -929,4 +936,85 @@ export class AudioEngine {
     this.sources = [];
     this.primaryOutput = null;
   }
+}
+
+// renderMixdown renders the audible takes offline through the exact same gain,
+// volume, pan and effect chains the monitor bus uses, so the exported file
+// sounds like what was played back. The master volume is left at unity, since
+// it is a monitor setting rather than part of the mix.
+export async function renderMixdown(state, pcm) {
+  const selection = audibleTakes(state);
+  if (!selection.length) throw new Error("Nothing to export: select an audible take first.");
+  const rate = state.sampleRate || 48000;
+  let frames = 0;
+  for (const { take } of selection) {
+    if (!pcm.get(take.file)) throw new Error(`Missing audio for ${take.file}.`);
+    frames = Math.max(frames, take.startFrame + takeLength(take));
+  }
+  if (frames <= 0) throw new Error("Nothing to export: the selected takes are empty.");
+  const context = new OfflineAudioContext(2, frames, rate);
+  const chains = new Map();
+  for (const { track, take } of selection) {
+    let chain = chains.get(track.id);
+    if (!chain) {
+      const built = buildEffectsChain(context, track.effects);
+      const volume = context.createGain();
+      volume.gain.value = trackLevel(track);
+      const panner = context.createStereoPanner();
+      panner.pan.value = trackPan(track);
+      volume.connect(built.input);
+      built.output.connect(panner);
+      panner.connect(context.destination);
+      chain = { input: volume };
+      chains.set(track.id, chain);
+    }
+    const buffer = bufferFromAudio(context, pcm.get(take.file));
+    const trimStart = Math.max(0, take.trim.startFrame);
+    const trimEnd = take.trim.endFrame > 0 ? take.trim.endFrame : take.lengthFrames;
+    const offset = trimStart / rate;
+    if (offset >= buffer.duration) continue;
+    const duration = Math.min((trimEnd - trimStart) / rate, buffer.duration - offset);
+    if (duration <= 0) continue;
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    const gain = context.createGain();
+    gain.gain.value = Math.pow(10, (Number(take.gainDb) || 0) / 20);
+    source.connect(gain);
+    gain.connect(chain.input);
+    source.start(take.startFrame / rate, offset, duration);
+  }
+  return context.startRendering();
+}
+
+// encodeWav writes a 32-bit IEEE float WAV, the format the session core uses
+// for its own exports and take files.
+export function encodeWav(buffer) {
+  const channels = buffer.numberOfChannels;
+  const dataBytes = buffer.length * channels * 4;
+  const bytes = new Uint8Array(44 + dataBytes);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset, text) => {
+    for (let index = 0; index < text.length; index++) bytes[offset + index] = text.charCodeAt(index);
+  };
+  ascii(0, "RIFF");
+  view.setUint32(4, 36 + dataBytes, true);
+  ascii(8, "WAVE");
+  ascii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 3, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, buffer.sampleRate, true);
+  view.setUint32(28, buffer.sampleRate * channels * 4, true);
+  view.setUint16(32, channels * 4, true);
+  view.setUint16(34, 32, true);
+  ascii(36, "data");
+  view.setUint32(40, dataBytes, true);
+  const samples = new Float32Array(bytes.buffer, 44, buffer.length * channels);
+  for (let channel = 0; channel < channels; channel++) {
+    const data = buffer.getChannelData(channel);
+    for (let frame = 0; frame < buffer.length; frame++) {
+      samples[frame * channels + channel] = data[frame];
+    }
+  }
+  return bytes;
 }

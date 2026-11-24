@@ -8,11 +8,11 @@ import (
 	"fanamix/domain/session"
 )
 
-// SchemaVersion is the project file version this build writes. Version 4 lets
-// PC audio tracks carry their own effects; version 3 adds layered take
-// segments; version 2 stores the five-band equalizer; version 1 projects are
-// migrated when loaded.
-const SchemaVersion = 4
+// SchemaVersion is the project file version this build writes. Version 5 stores
+// effect chains as ordered lists; version 4 lets PC audio tracks carry their own
+// effects; version 3 adds layered take segments; version 2 stores the five-band
+// equalizer; version 1 projects are migrated when loaded.
+const SchemaVersion = 5
 
 // ErrUnsupportedSchema is returned when a project was written by a newer app.
 var ErrUnsupportedSchema = errors.New("jsonstore: project schema is newer than this app")

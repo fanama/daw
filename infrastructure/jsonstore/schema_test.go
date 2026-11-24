@@ -36,7 +36,12 @@ func TestStateFromProjectDriesLegacySystemEffects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode v4: %v", err)
 	}
-	if !state.Tracks[0].Effects.Amp.Enabled {
+	if !enabledAmp(state.Tracks[0].Effects) {
 		t.Fatalf("v4 PC audio effects were dropped: %+v", state.Tracks[0].Effects)
 	}
+}
+
+func enabledAmp(effects mix.Effects) bool {
+	effect, ok := effects.Find(mix.EffectAmp)
+	return ok && effect.Amp != nil && effect.Amp.Enabled
 }

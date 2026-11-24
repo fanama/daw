@@ -123,6 +123,10 @@ type request struct {
 	EndFrame    int          `json:"endFrame"`
 	Frames      int          `json:"frames"`
 	Incomplete  bool         `json:"incomplete"`
+	Kind        string       `json:"kind"`
+	Index       int          `json:"index"`
+	From        int          `json:"from"`
+	To          int          `json:"to"`
 	Effects     *mix.Effects `json:"effects"`
 }
 

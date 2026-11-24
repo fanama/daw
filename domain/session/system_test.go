@@ -91,13 +91,19 @@ func TestSystemAudioAcceptsChainedEffects(t *testing.T) {
 		t.Fatalf("a new PC audio track should start dry: %+v", pc.Effects())
 	}
 	effects := mix.DryEffects()
-	effects.EQ.Enabled = true
-	effects.EQ.Bands[2].GainDB = 6
+	for index := range effects.Chain {
+		if effects.Chain[index].Kind != mix.EffectEQ {
+			continue
+		}
+		effects.Chain[index].EQ.Enabled = true
+		effects.Chain[index].EQ.Bands[2].GainDB = 6
+	}
 	if err := s.SetEffects(pc.ID(), effects); err != nil {
 		t.Fatalf("set system effects: %v", err)
 	}
 	track, ok := s.FindTrack(pc.ID())
-	if !ok || !track.Effects().EQ.Enabled || track.Effects().EQ.Bands[2].GainDB != 6 {
+	eq, hasEQ := track.Effects().Find(mix.EffectEQ)
+	if !ok || !hasEQ || eq.EQ == nil || !eq.EQ.Enabled || eq.EQ.Bands[2].GainDB != 6 {
 		t.Fatalf("system effects were not stored: %+v", track.Effects())
 	}
 }

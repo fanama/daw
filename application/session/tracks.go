@@ -129,6 +129,39 @@ func (s *Service) SetEffects(id session.TrackID, effects mix.Effects) error {
 	return s.Save()
 }
 
+// AddEffect appends an effect of the given kind to a track's chain.
+func (s *Service) AddEffect(id session.TrackID, kind mix.EffectKind) error {
+	if err := s.requireSession(); err != nil {
+		return err
+	}
+	if err := s.current.AddEffect(id, kind); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
+// RemoveEffect drops one position from a track's chain.
+func (s *Service) RemoveEffect(id session.TrackID, index int) error {
+	if err := s.requireSession(); err != nil {
+		return err
+	}
+	if err := s.current.RemoveEffect(id, index); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
+// MoveEffect reorders a track's chain.
+func (s *Service) MoveEffect(id session.TrackID, from, to int) error {
+	if err := s.requireSession(); err != nil {
+		return err
+	}
+	if err := s.current.MoveEffect(id, from, to); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
 // RemoveTrack deletes a track and moves its takes to the session trash.
 func (s *Service) RemoveTrack(id session.TrackID) error {
 	if err := s.requireSession(); err != nil {

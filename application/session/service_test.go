@@ -6,6 +6,7 @@ import (
 	"time"
 
 	sessionapp "fanamix/application/session"
+	"fanamix/domain/mix"
 	"fanamix/infrastructure/jsonstore"
 	"fanamix/infrastructure/wavio"
 )
@@ -88,7 +89,7 @@ func TestSessionReopensFromDisk(t *testing.T) {
 	if len(reloadedTracks) != 1 || !reloadedTracks[0].IsArmed() {
 		t.Fatalf("arming was not persisted: %+v", reloadedTracks)
 	}
-	if !loaded.Tracks()[0].Effects().Amp.Enabled {
+	if !ampEnabled(loaded.Tracks()[0].Effects()) {
 		t.Fatal("default effects were not restored")
 	}
 }
@@ -112,9 +113,14 @@ func TestChainsMapEveryTrackToItsChannel(t *testing.T) {
 	if chains[1].Channel != 2 || !chains[1].PrintEffects {
 		t.Fatalf("unexpected chain: %+v", chains[1])
 	}
-	if !chains[1].Effects.Amp.Enabled {
+	if !ampEnabled(chains[1].Effects) {
 		t.Fatal("expected the default amp chain")
 	}
+}
+
+func ampEnabled(effects mix.Effects) bool {
+	effect, ok := effects.Find(mix.EffectAmp)
+	return ok && effect.Amp != nil && effect.Amp.Enabled
 }
 
 func TestSummariesListTheSessionFolderName(t *testing.T) {

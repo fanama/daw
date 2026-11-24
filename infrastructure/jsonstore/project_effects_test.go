@@ -8,7 +8,7 @@ import (
 
 func TestEffectsToDomainMigratesThreeBandEQ(t *testing.T) {
 	stored := effectsJSON{
-		EQ: eqJSON{
+		EQ: &eqJSON{
 			Enabled: true,
 			Bands: []bandJSON{
 				{FrequencyHz: 100, Q: 0.7, GainDB: -4},
@@ -17,7 +17,11 @@ func TestEffectsToDomainMigratesThreeBandEQ(t *testing.T) {
 			},
 		},
 	}
-	bands := effectsToDomain(stored).EQ.Bands
+	effect, ok := effectsToDomain(stored).Find(mix.EffectEQ)
+	if !ok || effect.EQ == nil {
+		t.Fatal("legacy EQ was dropped")
+	}
+	bands := effect.EQ.Bands
 	if bands[0].FrequencyHz != 20 || bands[4].FrequencyHz != 20000 {
 		t.Fatalf("legacy EQ did not gain endpoint bands: %+v", bands)
 	}
@@ -33,7 +37,38 @@ func TestEffectsToDomainMigratesThreeBandEQ(t *testing.T) {
 
 func TestEffectsFromDomainWritesFiveBands(t *testing.T) {
 	stored := effectsFromDomain(mix.DefaultEffects())
-	if len(stored.EQ.Bands) != 5 {
-		t.Fatalf("expected five stored bands, got %d", len(stored.EQ.Bands))
+	var eq *eqJSON
+	for index := range stored.Chain {
+		if stored.Chain[index].Kind == string(mix.EffectEQ) {
+			eq = stored.Chain[index].EQ
+		}
+	}
+	if eq == nil || len(eq.Bands) != 5 {
+		t.Fatalf("expected one stored five-band equalizer, got %+v", stored.Chain)
+	}
+}
+
+func TestEffectsRoundTripKeepsOrderAndRepeats(t *testing.T) {
+	effects := mix.Effects{Chain: []mix.Effect{
+		mix.NewEffect(mix.EffectReverb),
+		mix.NewEffect(mix.EffectEQ),
+		mix.NewEffect(mix.EffectReverb),
+	}}
+	loaded := effectsToDomain(effectsFromDomain(effects))
+	if len(loaded.Chain) != 3 {
+		t.Fatalf("expected three instances, got %+v", loaded.Chain)
+	}
+	if loaded.Chain[0].Kind != mix.EffectReverb || loaded.Chain[1].Kind != mix.EffectEQ || loaded.Chain[2].Kind != mix.EffectReverb {
+		t.Fatalf("chain order changed: %+v", loaded.Chain)
+	}
+	if loaded.Chain[0].Reverb == nil || loaded.Chain[2].Reverb == nil {
+		t.Fatalf("repeated instances lost their settings: %+v", loaded.Chain)
+	}
+}
+
+func TestEffectsToDomainKeepsAnEmptyChain(t *testing.T) {
+	loaded := effectsToDomain(effectsJSON{Chain: []effectJSON{}})
+	if len(loaded.Chain) != 0 || !loaded.Bypassed() {
+		t.Fatalf("an explicit empty chain must stay empty: %+v", loaded.Chain)
 	}
 }
