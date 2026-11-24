@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 func TestSplitTakeSharesTheRecordingBetweenHalves(t *testing.T) {

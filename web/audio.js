@@ -37,19 +37,10 @@ function trackPan(track) {
   return Math.max(-1, Math.min(1, Number(track.pan) || 0));
 }
 
-// PC audio is monitored dry: its track has no effect controls, so it must not
-// inherit the guitar amp/cab defaults from the shared effect vocabulary.
-function monitorChain(context, track) {
-  if (track.source !== "system") return buildEffectsChain(context, track.effects);
-  const node = context.createGain();
-  return {
-    input: node,
-    output: node,
-    nodes: [node],
-    dispose() {
-      try { node.disconnect(); } catch (error) { /* already gone */ }
-    },
-  };
+// Every track plays through its own chain, both when monitored live and when
+// its recorded takes are played back.
+function trackChain(context, track) {
+  return buildEffectsChain(context, track.effects);
 }
 
 export class AudioEngine {
@@ -421,7 +412,7 @@ export class AudioEngine {
       let chain = this.chains.get(track.id);
       if (!chain || chain.signature !== signature) {
         if (chain) chain.dispose();
-        const built = monitorChain(this.ctx, track);
+        const built = trackChain(this.ctx, track);
         const analyser = this.ctx.createAnalyser();
         analyser.fftSize = 2048;
         analyser.smoothingTimeConstant = 0.65;
@@ -504,7 +495,7 @@ export class AudioEngine {
     const signature = JSON.stringify({ effects: track.effects, source: track.source });
     const current = this.playbackChains.get(track.id);
     if (current && current.signature === signature) return current;
-    const built = monitorChain(this.ctx, track);
+    const built = trackChain(this.ctx, track);
     const panner = this.ctx.createStereoPanner();
     panner.pan.value = trackPan(track);
     built.output.connect(panner);
@@ -692,7 +683,7 @@ export class AudioEngine {
     const source = this.inputs.get(kind);
     if (!source) throw new Error("The audio source is not open.");
     if (kind !== "system" && !source.splitter) throw new Error("The audio input has no channels.");
-    const node = new AudioWorkletNode(this.ctx, "gorecord-capture", {
+    const node = new AudioWorkletNode(this.ctx, "fanamix-capture", {
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [1],

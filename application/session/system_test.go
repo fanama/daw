@@ -3,7 +3,7 @@ package sessionapp_test
 import (
 	"testing"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 func TestSystemAudioTrackRecordsItsOwnStereoTake(t *testing.T) {
@@ -46,7 +46,7 @@ func TestSystemAudioTrackRecordsItsOwnStereoTake(t *testing.T) {
 	}
 }
 
-func TestSystemAudioRefusesChainedEffects(t *testing.T) {
+func TestSystemAudioPrintsDryAndStaysOutOfInputChains(t *testing.T) {
 	service := newService(t)
 	if err := service.Create("PC idea", 48000); err != nil {
 		t.Fatalf("create: %v", err)

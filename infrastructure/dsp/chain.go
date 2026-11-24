@@ -3,7 +3,7 @@ package dsp
 import (
 	"sync/atomic"
 
-	"gorecord/domain/mix"
+	"fanamix/domain/mix"
 )
 
 // Chain is the per-input-channel effect chain. Parameter changes arrive

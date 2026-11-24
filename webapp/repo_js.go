@@ -7,8 +7,8 @@ import (
 	"sync"
 	"syscall/js"
 
-	"gorecord/domain/session"
-	"gorecord/infrastructure/jsonstore"
+	"fanamix/domain/session"
+	"fanamix/infrastructure/jsonstore"
 )
 
 // browserRepo keeps the open project in memory and hands every save to the
@@ -23,7 +23,7 @@ func newBrowserRepo() *browserRepo {
 }
 
 // Root names the virtual sessions folder used in session roots.
-func (r *browserRepo) Root() string { return "gorecord" }
+func (r *browserRepo) Root() string { return "fanamix" }
 
 // stage registers project JSON the page loaded before Open runs.
 func (r *browserRepo) stage(root, project string) {
@@ -41,7 +41,7 @@ func (r *browserRepo) Save(root string, current *session.Session) error {
 	r.mu.Lock()
 	r.projects[root] = data
 	r.mu.Unlock()
-	host := js.Global().Get("gorecordHost")
+	host := js.Global().Get("fanamixHost")
 	if host.Truthy() {
 		host.Call("save", root, string(data), current.Name())
 	}

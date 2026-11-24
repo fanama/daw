@@ -1,6 +1,6 @@
 package jsonstore
 
-import "gorecord/domain/session"
+import "fanamix/domain/session"
 
 type markerJSON struct {
 	ID    string `json:"id"`

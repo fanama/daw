@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"gorecord/domain/studio"
+	"fanamix/domain/studio"
 )
 
 type frameBlock struct {

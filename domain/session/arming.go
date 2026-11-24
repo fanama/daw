@@ -3,7 +3,7 @@ package session
 import (
 	"sort"
 
-	"gorecord/domain/mix"
+	"fanamix/domain/mix"
 )
 
 // ArmSlot is one recorded source in the next take, in take channel order.

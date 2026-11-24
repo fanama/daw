@@ -3,7 +3,7 @@ package sessionapp
 import (
 	"errors"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 // AddMarker stores a named marker in the open session.

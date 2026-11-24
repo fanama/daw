@@ -3,7 +3,7 @@ package sessionapp_test
 import (
 	"testing"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 func TestBeginTrackTakesCreatesOneTakePerSource(t *testing.T) {

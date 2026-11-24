@@ -16,10 +16,10 @@ func bind(name string, callback func(js.Value, []js.Value) any) {
 
 func main() {
 	core := newCore()
-	bind("gorecordCore", core.invoke)
-	bind("gorecordSetPCM", core.setPCM)
-	bind("gorecordClearPCM", core.clearPCM)
-	bind("gorecordExportWAV", core.exportWAV)
-	js.Global().Set("gorecordReady", true)
+	bind("fanamixCore", core.invoke)
+	bind("fanamixSetPCM", core.setPCM)
+	bind("fanamixClearPCM", core.clearPCM)
+	bind("fanamixExportWAV", core.exportWAV)
+	js.Global().Set("fanamixReady", true)
 	select {}
 }

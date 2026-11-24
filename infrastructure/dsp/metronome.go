@@ -3,7 +3,7 @@ package dsp
 import (
 	"math"
 
-	"gorecord/domain/mix"
+	"fanamix/domain/mix"
 )
 
 const clickDecaySeconds = 0.03

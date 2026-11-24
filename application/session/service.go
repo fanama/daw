@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 // Service is the inbound port for session editing.
@@ -69,6 +69,20 @@ func (s *Service) Open(root string) error {
 	s.current = loaded
 	s.root = root
 	return s.reconcileRecoveredTakes()
+}
+
+// Restore replaces the open session with a state snapshot and persists it, so
+// an undo reaches both the model and the stored project.
+func (s *Service) Restore(state session.State) error {
+	if s.current == nil {
+		return errors.New("no session is open")
+	}
+	restored, err := session.Restore(state)
+	if err != nil {
+		return err
+	}
+	s.current = restored
+	return s.Save()
 }
 
 // Save persists the current session.

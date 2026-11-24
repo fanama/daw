@@ -3,9 +3,9 @@ package malgoengine
 import (
 	"sync/atomic"
 
+	"fanamix/domain/mix"
+	"fanamix/domain/studio"
 	"github.com/gen2brain/malgo"
-	"gorecord/domain/mix"
-	"gorecord/domain/studio"
 )
 
 func normalizeConfig(config studio.DeviceConfig) studio.DeviceConfig {

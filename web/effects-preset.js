@@ -71,7 +71,7 @@ export function effectsToPreset(effects = {}) {
 }
 
 export function effectsFromPreset(preset, current) {
-  if (!isObject(preset)) throw new Error("That file is not a gorecord effects preset.");
+  if (!isObject(preset)) throw new Error("That file is not a fanamix effects preset.");
   const effects = JSON.parse(JSON.stringify(current));
   let changed = false;
 

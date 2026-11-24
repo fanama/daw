@@ -3,9 +3,9 @@ package sessionapp
 import (
 	"errors"
 
-	"gorecord/domain/mix"
-	"gorecord/domain/session"
-	"gorecord/domain/studio"
+	"fanamix/domain/mix"
+	"fanamix/domain/session"
+	"fanamix/domain/studio"
 )
 
 // AddTrack appends a track bound to one device channel.

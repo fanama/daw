@@ -3,7 +3,7 @@ package session
 import (
 	"time"
 
-	"gorecord/domain/mix"
+	"fanamix/domain/mix"
 )
 
 // TrackState is the persistence- and transport-neutral shape of a track.

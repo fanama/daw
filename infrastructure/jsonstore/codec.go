@@ -3,7 +3,7 @@ package jsonstore
 import (
 	"encoding/json"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 // EncodeState renders a session snapshot as versioned project JSON. It is the

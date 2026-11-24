@@ -4,7 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"gorecord/domain/session"
+	"fanamix/domain/mix"
+	"fanamix/domain/session"
 )
 
 func addSystemTrack(t *testing.T, target *session.Session, name string) session.Track {
@@ -80,6 +81,24 @@ func TestSystemAudioTakesAreAlwaysDry(t *testing.T) {
 
 	if err := s.SetPrintEffects(pc.ID(), true); !session.IsCode(err, session.CodeInvalid) {
 		t.Fatalf("expected invalid print request, got %v", err)
+	}
+}
+
+func TestSystemAudioAcceptsChainedEffects(t *testing.T) {
+	s := newSession(t)
+	pc := addSystemTrack(t, s, "Browser")
+	if !pc.Effects().Bypassed() {
+		t.Fatalf("a new PC audio track should start dry: %+v", pc.Effects())
+	}
+	effects := mix.DryEffects()
+	effects.EQ.Enabled = true
+	effects.EQ.Bands[2].GainDB = 6
+	if err := s.SetEffects(pc.ID(), effects); err != nil {
+		t.Fatalf("set system effects: %v", err)
+	}
+	track, ok := s.FindTrack(pc.ID())
+	if !ok || !track.Effects().EQ.Enabled || track.Effects().EQ.Bands[2].GainDB != 6 {
+		t.Fatalf("system effects were not stored: %+v", track.Effects())
 	}
 }
 

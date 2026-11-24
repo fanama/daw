@@ -3,8 +3,8 @@ package main
 import (
 	"time"
 
-	"gorecord/domain/mix"
-	"gorecord/domain/session"
+	"fanamix/domain/mix"
+	"fanamix/domain/session"
 )
 
 // webState is the browser view of a session. It is flat and camelCase so the

@@ -5,8 +5,8 @@ import (
 	"math"
 	"testing"
 
-	"gorecord/domain/mix"
-	"gorecord/domain/studio"
+	"fanamix/domain/mix"
+	"fanamix/domain/studio"
 )
 
 const testFrames = 256

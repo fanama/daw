@@ -1,6 +1,6 @@
 package jsonstore
 
-import "gorecord/domain/mix"
+import "fanamix/domain/mix"
 
 type bandJSON struct {
 	FrequencyHz float64 `json:"frequencyHz"`

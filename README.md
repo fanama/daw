@@ -1,4 +1,4 @@
-# gorecord
+# fanamix
 
 A desktop recorder for song ideas, built on a browser UI: plug a mic and a
 guitar into your audio interface, record several inputs at once, layer takes
@@ -6,14 +6,14 @@ over what you just played, and keep the whole session in the app. The Go core
 compiles to WebAssembly, the UI is plain HTML/CSS/JS, Web Audio replaces the
 native engine, and IndexedDB replaces the session folder.
 
-`gorecord` is a local launcher. It serves the browser build on `127.0.0.1` and
+`fanamix` is a local launcher. It serves the browser build on `127.0.0.1` and
 opens it in a dedicated, chromeless app window of an installed Chromium browser
 (Chrome, Edge, Chromium or Brave). The window uses its own profile, separate
 from your everyday browsing. If no Chromium browser is found, it falls back to
 your default browser. There is no native GUI toolkit: Fyne has been removed.
 
 On macOS, `make bundle` packages the launcher and the web build into
-`dist/gorecord.app`, which can be double-clicked from Finder. The bundle still
+`dist/fanamix.app`, which can be double-clicked from Finder. The bundle still
 uses an installed Chromium for the window; it does not embed a webview.
 
 The domain and application layers are pure Go. The original native audio
@@ -26,7 +26,7 @@ application/       use cases: session editing, recording, mixdown export
 infrastructure/    float32 WAV, JSON projects, DSP, native audio adapters
 webapp/            WebAssembly composition root (same domain and use cases)
 web/               browser UI, Web Audio engine, IndexedDB storage
-cmd/gorecord/      local server and desktop window launcher
+cmd/fanamix/      local server and desktop window launcher
 packaging/macos/   Info.plist for the double-clickable app bundle
 ```
 
@@ -37,12 +37,12 @@ packaging/macos/   Info.plist for the double-clickable app bundle
   selected device is captured together, and each track receives its own take.
 - Layer takes on a sample-accurate timeline; previous takes play back while you
   record, and each take stores its start frame.
-- Per-track monitor chain for input tracks: drive + tone stack → cabinet
-  filter → 3-band EQ → compressor → reverb. The equalizer has five bands at
-  20 Hz, 100 Hz, 1 kHz, 6 kHz and 20 kHz. The chain is heard on live monitoring
-  and on the playback of recorded takes, but it is never printed into a take.
-  PC audio is monitored and played back dry.
-- Download a track's monitor effects as a JSON preset and load one back. A
+- Per-track effect chain for input and PC audio tracks: drive + tone stack →
+  cabinet filter → five-band EQ → compressor → reverb. The equalizer has bands
+  at 20 Hz, 100 Hz, 1 kHz, 6 kHz and 20 kHz. The chain is heard on live
+  monitoring, take playback and in the exported mix; it is not baked into the
+  take. PC audio tracks start dry and can enable any block.
+- Download a track's effects as a JSON preset and load one back. A
   loaded preset is merged over the current chain, then clamped by the core.
   Built-in presets cover electric, acoustic and classical guitar, bass, lead
   and backing vocals, and spoken word, with their EQ bands placed at 60 Hz,
@@ -96,8 +96,8 @@ exported WAV. Drag the knob up or down to pan, double-click it to centre.
 ## Build and run
 
 ```bash
-make build      # web build + bin/gorecord
-make bundle     # macOS bundle in dist/gorecord.app
+make build      # web build + bin/fanamix
+make bundle     # macOS bundle in dist/fanamix.app
 make run        # builds, serves on 127.0.0.1:8080, opens the app window
 make serve      # builds and serves without opening a window
 make site       # static browser build in dist-site/ for Freebuff Sites
@@ -107,26 +107,26 @@ make caps       # 300-line file / 40-line function check
 ```
 
 `make build` runs the WebAssembly build first and puts the launcher in
-`bin/gorecord`. The launcher looks for `web/` in the current directory; inside
+`bin/fanamix`. The launcher looks for `web/` in the current directory; inside
 the app bundle it uses `Contents/Resources/web` instead. Override the location
 with `-dir`:
 
 ```bash
-bin/gorecord -dir /path/to/web -addr 127.0.0.1:8080
+bin/fanamix -dir /path/to/web -addr 127.0.0.1:8080
 ```
 
-`make run` and `make serve` use `127.0.0.1:8080`. Running `bin/gorecord` or the
+`make run` and `make serve` use `127.0.0.1:8080`. Running `bin/fanamix` or the
 bundle without `-addr` picks a free local port, so it does not collide with an
 existing server.
 
 Window modes:
 
 ```bash
-bin/gorecord                    # dedicated app window, browser fallback
-bin/gorecord -window=app -addr 127.0.0.1:8080
-bin/gorecord -window=browser    # default browser tab or window
-bin/gorecord -window=none       # server only, no window
-bin/gorecord -browser "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+bin/fanamix                    # dedicated app window, browser fallback
+bin/fanamix -window=app -addr 127.0.0.1:8080
+bin/fanamix -window=browser    # default browser tab or window
+bin/fanamix -window=none       # server only, no window
+bin/fanamix -browser "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 ```
 
 `-browser` is only needed when automatic Chromium detection picks the wrong
@@ -136,7 +136,7 @@ signal and keeps the server alive. Ctrl+C still works from a terminal.
 
 ## Deploy on Freebuff Sites
 
-The browser build is static. `cmd/gorecord` is only the local launcher, so a
+The browser build is static. `cmd/fanamix` is only the local launcher, so a
 Freebuff deployment contains the Go core compiled to WebAssembly plus the files
 in `web/`; the Go server is not deployed.
 
@@ -169,10 +169,10 @@ them. The first load downloads the WASM core; no audio leaves the browser.
 
 ```bash
 make bundle
-open dist/gorecord.app
+open dist/fanamix.app
 ```
 
-The bundle contains `Contents/MacOS/gorecord` and the complete web build in
+The bundle contains `Contents/MacOS/fanamix` and the complete web build in
 `Contents/Resources/web`. Finder launches it with `/` as the working directory,
 so the launcher resolves its resources relative to the executable. The bundle
 is unsigned and not notarized: on another Mac, Gatekeeper may require
@@ -180,9 +180,9 @@ right-click → Open, or you can sign and notarize it for distribution.
 
 The app profile lives in:
 
-- macOS: `~/Library/Application Support/gorecord/browser`
-- Linux: `~/.config/gorecord/browser`
-- Windows: `%AppData%\gorecord\browser`
+- macOS: `~/Library/Application Support/fanamix/browser`
+- Linux: `~/.config/fanamix/browser`
+- Windows: `%AppData%\fanamix\browser`
 
 It is deliberately separate from your normal browser profile, so projects
 recorded in a browser tab are not listed in the app window, and clearing the
@@ -209,14 +209,15 @@ first selected output is the primary; additional outputs play the same mix in
 parallel. The choice is remembered locally.
 
 Takes are written to IndexedDB after you stop. **Export WAV** downloads the
-audible mix; mute, solo, active takes, take gain and trim are already applied.
+audible mix; mute, solo, active takes, take gain, track effects and trim are
+  already applied.
 
 ## Limitations
 
 - Desktop mode is a window of an installed Chromium browser. The macOS `.app`
   bundles the launcher and web build, but still requires Chromium; there is no
   embedded browser engine. Windows and Linux have no bundle target and still
-  run `bin/gorecord` with `web/` beside it.
+  run `bin/fanamix` with `web/` beside it.
 - The macOS bundle is unsigned and unnotarized, so Gatekeeper may block it on
   another machine. Right-click → Open bypasses that for local use.
 - Projects are local to the app profile. Clearing site data deletes them, and
@@ -235,9 +236,9 @@ audible mix; mute, solo, active takes, take gain and trim are already applied.
 - The primary master output uses the Web Audio destination directly; extra
   outputs go through a MediaStream and can lag it slightly. Separate channels
   of one interface are only selectable if the OS exposes them as outputs.
-- Effects shape live monitoring and recorded take playback for input tracks;
-  they are not printed into takes or the exported WAV. The Web Audio chain
-  approximates the desktop DSP. PC audio stays dry.
+- Effects shape live monitoring, recorded take playback and the exported WAV
+  for every track; PC audio starts dry and can enable any block. The Web Audio
+  chain approximates the desktop DSP.
 - Playback loads the active takes into memory.
 - Export is a single stereo float32 WAV at the session rate: no format,
   bit-depth or resampling choice, and no normalization of the mix itself.

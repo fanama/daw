@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 func newSession(t *testing.T) *session.Session {

@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"gorecord/domain/session"
-	"gorecord/domain/studio"
+	"fanamix/domain/session"
+	"fanamix/domain/studio"
 )
 
 const (

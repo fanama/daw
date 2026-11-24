@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"gorecord/domain/session"
-	"gorecord/infrastructure/wavio"
+	"fanamix/domain/session"
+	"fanamix/infrastructure/wavio"
 )
 
 func TestNormalizeTakeBoostsToTargetPeak(t *testing.T) {

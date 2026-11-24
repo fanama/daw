@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"gorecord/application/recording"
-	"gorecord/domain/session"
-	"gorecord/infrastructure/wavio"
+	"fanamix/application/recording"
+	"fanamix/domain/session"
+	"fanamix/infrastructure/wavio"
 )
 
 func TestMemoryTakesReadsRegisteredFrames(t *testing.T) {

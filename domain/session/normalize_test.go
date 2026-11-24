@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 func TestNormalizeGainMovesPeakToTarget(t *testing.T) {

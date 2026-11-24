@@ -5,7 +5,7 @@ import (
 	"errors"
 	"math"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 // MemoryMixdowns renders exports into memory, for clients that hand the bytes

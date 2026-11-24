@@ -5,10 +5,10 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"fanamix/domain/mix"
+	"fanamix/domain/studio"
+	"fanamix/infrastructure/dsp"
 	"github.com/gen2brain/malgo"
-	"gorecord/domain/mix"
-	"gorecord/domain/studio"
-	"gorecord/infrastructure/dsp"
 )
 
 const (

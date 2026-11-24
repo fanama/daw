@@ -97,19 +97,29 @@ function drawTake(context, take, track, y, laneHeight, layout, view) {
   if (right <= left) return;
   const startPixel = Math.max(0, Math.floor(left - x));
   const endPixel = Math.min(width, Math.ceil(right - x));
+  const selected = take.id === view.selectedTakeId;
   const playing = take.id === track.activeTakeId || take.layered;
-  context.fillStyle = playing ? "#1f4a3f" : "#202836";
+  context.fillStyle = selected ? "#245445" : playing ? "#1f4a3f" : "#202836";
   context.fillRect(left, y + 14, right - left, laneHeight - 20);
   context.strokeStyle = take.incomplete ? "#f2555a" : playing ? "#3c8f74" : "#2b3444";
   context.lineWidth = 1;
   context.strokeRect(x + 0.5, y + 14.5, Math.max(1, width - 1), laneHeight - 21);
+  if (selected) {
+    // A bright top edge and a thick outline make the selected clip obvious
+    // even when it is only partly visible at the current zoom.
+    context.fillStyle = "#8be8c5";
+    context.fillRect(left, y + 14, right - left, 2);
+    context.strokeStyle = "#8be8c5";
+    context.lineWidth = 2;
+    context.strokeRect(left + 1, y + 15, Math.max(1, right - left - 2), laneHeight - 22);
+  }
   const data = view.peaks.get(take.file);
   if (!data) return;
   context.save();
   context.beginPath();
   context.rect(left, y + 14, right - left, laneHeight - 20);
   context.clip();
-  context.strokeStyle = playing ? "#8be8c5" : "#7c8ba0";
+  context.strokeStyle = selected ? "#d9fff2" : playing ? "#8be8c5" : "#7c8ba0";
   waveFor(context, data, x, startPixel, endPixel, layout.pxPerFrame, take.trim.startFrame, y + 14 + (laneHeight - 20) / 2, (laneHeight - 26) / 2);
   context.restore();
 }

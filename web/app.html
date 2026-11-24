@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gorecord</title>
+  <title>fanamix</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app" hidden>
     <header class="topbar">
-      <div class="brand">gorecord<span id="session-name" class="session-name"></span></div>
+      <div class="brand">fanamix<span id="session-name" class="session-name"></span></div>
       <div class="transport">
         <button id="btn-record" class="round record" title="Record (R)" aria-label="Record"></button>
         <button id="btn-play" class="round" title="Play (Space)" aria-label="Play">▶</button>
@@ -54,6 +54,8 @@
             <button type="button" data-action="split"><span>Split take at playhead</span><kbd>S</kbd></button>
             <button type="button" data-action="copy"><span>Copy take</span><kbd>Ctrl/Cmd+C</kbd></button>
             <button type="button" data-action="paste"><span>Paste at playhead</span><kbd>Ctrl/Cmd+V</kbd></button>
+            <button type="button" data-action="deleteTake"><span>Delete selected take</span><kbd>Del</kbd></button>
+            <button type="button" data-action="undo"><span>Undo</span><kbd>Ctrl/Cmd+Z</kbd></button>
             <button type="button" data-action="export"><span>Export WAV</span><kbd>—</kbd></button>
             <div class="shortcut-head"><strong>View</strong></div>
             <button type="button" data-action="zoomIn"><span>Zoom in</span><kbd>+</kbd></button>
@@ -79,11 +81,11 @@
           </span>
         </div>
         <div id="track-list" class="track-list"></div>
-        <p class="hint">Arm <b>●</b> to record; press <b>L</b> to listen without arming. PC and input tracks can be recorded or monitored together. <b>S</b> splits a take at the playhead; <b>Ctrl/Cmd+C</b> copies it and <b>Ctrl/Cmd+V</b> pastes it there.</p>
+        <p class="hint">Arm <b>●</b> to record; press <b>L</b> to listen without arming. PC and input tracks can be recorded or monitored together. Click a clip to select it; <b>Del</b> removes it, <b>Ctrl/Cmd+Z</b> undoes the last edit. <b>S</b> splits a take at the playhead; <b>Ctrl/Cmd+C</b> copies it and <b>Ctrl/Cmd+V</b> pastes it there.</p>
       </aside>
 
       <section class="timeline">
-        <canvas id="timeline" title="S split · Ctrl/Cmd+C copy · Ctrl/Cmd+V paste at the playhead"></canvas>
+        <canvas id="timeline" title="Click a clip to select · Del delete · Ctrl/Cmd+Z undo · S split · Ctrl/Cmd+C/V copy and paste at the playhead"></canvas>
       </section>
 
       <aside id="inspector" class="inspector"></aside>
@@ -97,7 +99,7 @@
 
   <div id="picker" class="overlay">
     <div class="card">
-      <h1>gorecord</h1>
+      <h1>fanamix</h1>
       <p class="lead">Record a mic or guitar, layer takes against them, and keep the idea in this browser.</p>
       <div id="session-list" class="session-list"></div>
       <form id="new-session" class="new-session">
@@ -110,7 +112,7 @@
       </form>
       <p class="hint">Your browser asks for microphone access the first time you record or monitor an input. Audio stays on this device.</p>
       <p class="card-links">
-        <a href="index.html" target="_blank" rel="noreferrer">About gorecord</a>
+        <a href="index.html" target="_blank" rel="noreferrer">About fanamix</a>
         <a href="https://github.com/fanama" target="_blank" rel="noreferrer">GitHub ↗</a>
       </p>
     </div>

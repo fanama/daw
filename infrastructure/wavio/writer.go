@@ -6,7 +6,7 @@ import (
 	"math"
 	"os"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 // ErrCapacityReached is returned when a take hits the RIFF size ceiling.

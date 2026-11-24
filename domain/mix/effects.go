@@ -83,6 +83,23 @@ func DefaultEffects() Effects {
 	}
 }
 
+// DryEffects returns a chain with every block disabled. PC audio tracks start
+// dry so a shared tab is played back as-is until a block is enabled.
+func DryEffects() Effects {
+	effects := DefaultEffects()
+	effects.Amp.Enabled = false
+	effects.Cab.Enabled = false
+	effects.EQ.Enabled = false
+	effects.Comp.Enabled = false
+	effects.Reverb.Enabled = false
+	return effects
+}
+
+// Bypassed reports whether no block processes the signal.
+func (e Effects) Bypassed() bool {
+	return !e.Amp.Enabled && !e.Cab.Enabled && !e.EQ.Enabled && !e.Comp.Enabled && !e.Reverb.Enabled
+}
+
 // Normalize returns a clamped copy so the aggregate never stores values the
 // DSP cannot honor.
 func (e Effects) Normalize() Effects {

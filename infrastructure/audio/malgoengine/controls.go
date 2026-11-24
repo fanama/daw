@@ -3,8 +3,8 @@ package malgoengine
 import (
 	"math"
 
-	"gorecord/domain/mix"
-	"gorecord/domain/studio"
+	"fanamix/domain/mix"
+	"fanamix/domain/studio"
 )
 
 // SetMonitor enables or disables input monitoring.

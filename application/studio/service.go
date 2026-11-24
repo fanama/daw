@@ -5,8 +5,8 @@ package studioapp
 import (
 	"errors"
 
-	"gorecord/domain/mix"
-	"gorecord/domain/studio"
+	"fanamix/domain/mix"
+	"fanamix/domain/studio"
 )
 
 // Service is the inbound port for the audio hardware.

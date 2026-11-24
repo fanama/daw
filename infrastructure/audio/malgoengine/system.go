@@ -8,8 +8,8 @@ import (
 	"runtime"
 	"sync/atomic"
 
+	"fanamix/domain/studio"
 	"github.com/gen2brain/malgo"
-	"gorecord/domain/studio"
 )
 
 const (

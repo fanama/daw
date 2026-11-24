@@ -9,7 +9,10 @@ import (
 	"runtime"
 )
 
-const appProfileName = "gorecord"
+const (
+	appProfileName    = "fanamix"
+	legacyProfileName = "gorecord"
+)
 
 // launchAppWindow opens url in a chromeless window of an installed Chromium
 // browser. The dedicated profile keeps the app's IndexedDB data separate from
@@ -51,6 +54,19 @@ func appProfileDir() (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(base, appProfileName, "browser")
+	legacy := filepath.Join(base, legacyProfileName, "browser")
+	if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
+		if _, legacyErr := os.Stat(legacy); legacyErr == nil {
+			if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+				return "", err
+			}
+			if err := os.Rename(legacy, dir); err != nil {
+				// A running old window can lock the profile. Keep using it in
+				// place so the projects inside stay available.
+				return legacy, nil
+			}
+		}
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

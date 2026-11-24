@@ -3,8 +3,8 @@
 package malgoengine
 
 import (
+	"fanamix/domain/studio"
 	"github.com/gen2brain/malgo"
-	"gorecord/domain/studio"
 )
 
 // Catalog lists audio endpoints through a short-lived miniaudio context.

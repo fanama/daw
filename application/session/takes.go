@@ -3,8 +3,8 @@ package sessionapp
 import (
 	"errors"
 
-	"gorecord/domain/session"
-	"gorecord/domain/studio"
+	"fanamix/domain/session"
+	"fanamix/domain/studio"
 )
 
 // BeginTake creates the legacy single multichannel take entry before the

@@ -1,4 +1,4 @@
-// Built-in monitor-effect presets. Each entry is a complete chain in the same
+// Built-in effect presets. Each entry is a complete chain in the same
 // camelCase shape as a downloaded preset, so choosing one replaces the track's
 // current settings instead of layering over them.
 

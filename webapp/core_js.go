@@ -12,11 +12,12 @@ import (
 	"syscall/js"
 	"time"
 
-	"gorecord/application/recording"
-	sessionapp "gorecord/application/session"
-	"gorecord/domain/mix"
-	"gorecord/domain/session"
-	"gorecord/infrastructure/wavio"
+	"fanamix/application/recording"
+	sessionapp "fanamix/application/session"
+	"fanamix/domain/mix"
+	"fanamix/domain/session"
+	"fanamix/infrastructure/dsp"
+	"fanamix/infrastructure/wavio"
 )
 
 // core adapts the session use cases to synchronous JSON calls from the page.
@@ -26,6 +27,7 @@ type core struct {
 	mixdowns *wavio.MemoryMixdowns
 	service  *sessionapp.Service
 	exporter *recording.MixdownExporter
+	history  *undoHistory
 }
 
 func newCore() *core {
@@ -38,12 +40,14 @@ func newCore() *core {
 		takes:    takes,
 		mixdowns: mixdowns,
 		service:  service,
-		exporter: recording.NewMixdownExporter(takes, mixdowns),
+		exporter: recording.NewMixdownExporterWithProcessor(takes, mixdowns, dsp.Factory{}),
+		history:  newUndoHistory(),
 	}
 }
 
 func (c *core) dispatch(req request) response {
 	result := response{OK: true}
+	before, track := c.beforeEdit(req.Op)
 	var err error
 	switch req.Op {
 	case "create":
@@ -54,6 +58,8 @@ func (c *core) dispatch(req request) response {
 	case "close":
 		c.service.Close()
 	case "state":
+	case "state.undo":
+		err = c.undo()
 	case "take.begin":
 		result.Takes, result.Slots, err = c.beginTakes(req.StartFrame)
 	case "export":
@@ -65,6 +71,11 @@ func (c *core) dispatch(req request) response {
 	}
 	if err != nil {
 		return response{OK: false, Error: err.Error()}
+	}
+	if resetsUndo(req.Op) {
+		c.history.clear()
+	} else if track {
+		c.history.record(before, c.currentState())
 	}
 	if current := c.service.Current(); current != nil {
 		result.State = newWebState(c.service.Root(), current)
@@ -268,5 +279,5 @@ func (c *core) exportWAV(js.Value, []js.Value) any {
 }
 
 func consoleError(err error) {
-	js.Global().Get("console").Call("error", "gorecord: "+err.Error())
+	js.Global().Get("console").Call("error", "fanamix: "+err.Error())
 }

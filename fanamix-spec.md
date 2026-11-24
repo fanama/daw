@@ -1,13 +1,13 @@
-# gorecord — Specification
+# fanamix — Specification
 
 **Status:** draft, pre-implementation
-**Working title:** `gorecord` (rename freely; it is only used for the module path and binary name here)
+**Working title:** `fanamix` (rename freely; it is only used for the module path and binary name here)
 **Date:** 2026-11-20
 **Author:** interview-driven, based on the user's request and five rounds of clarifying questions
 
-> **Implementation note:** the Fyne desktop shell described in this spec has been retired. The shipping app is the browser build (`webapp/` + `web/`), which `cmd/gorecord` opens in a dedicated Chromium app window (with a default-browser fallback); the sections below remain as the original design record.
+> **Implementation note:** the Fyne desktop shell described in this spec has been retired. The shipping app is the browser build (`webapp/` + `web/`), which `cmd/fanamix` opens in a dedicated Chromium app window (with a default-browser fallback); the sections below remain as the original design record.
 
-> One sentence: a cross-platform Go desktop app for recording a microphone and electric guitar through an audio interface into layered, timeline-aligned takes — with a live amp/EQ/comp/reverb monitor chain, a tuner, and an optional click — organized into one session folder per song idea.
+> One sentence: a cross-platform Go desktop app for recording a microphone and electric guitar through an audio interface into layered, timeline-aligned takes — with a per-track amp/EQ/comp/reverb effect chain, a tuner, and an optional click — organized into one session folder per song idea.
 
 ---
 
@@ -15,7 +15,7 @@
 
 Songwriting ideas arrive as fragments: a riff played once, a vocal line hummed over it, a second guitar part. Capturing them today means either opening a full DAW (heavy, slow, project-file ceremony) or using a phone voice memo (no layering, no monitoring, no alignment).
 
-`gorecord` is the middle ground: press record and play, hear yourself processed, then immediately layer another take against what you just recorded, and keep the whole thing as one session folder you can hand to a real DAW later. It is deliberately **not** a DAW: no comping, no MIDI, no plugin hosting, and no destructive iteration on recorded audio.
+`fanamix` is the middle ground: press record and play, hear yourself processed, then immediately layer another take against what you just recorded, and keep the whole thing as one session folder you can hand to a real DAW later. It is deliberately **not** a DAW: no comping, no MIDI, no plugin hosting, and no destructive iteration on recorded audio.
 
 The app must feel like a musical instrument: live monitoring under 10 ms, no clicks, and no lost audio ever.
 
@@ -174,7 +174,7 @@ Identifiers are stable so they can be referenced from issues and tests.
 ### 7.1 Session folder layout
 
 ```
-~/Music/gorecord/<Session Name>/
+~/Music/fanamix/<Session Name>/
 ├── project.json                     # session + tracks + takes + settings
 ├── takes/
 │   ├── take-001.wav                 # 32-bit float, N channels, session rate
@@ -197,7 +197,7 @@ Rules:
 ```jsonc
 {
   "schemaVersion": 1,
-  "app": { "name": "gorecord", "version": "0.1.0" },
+  "app": { "name": "fanamix", "version": "0.1.0" },
   "session": {
     "name": "Riff idea 3",
     "createdAt": "2026-11-20T10:12:00Z",
@@ -292,9 +292,9 @@ Schema rules:
 ### 8.1 Package layout
 
 ```
-gorecord/
-├── cmd/gorecord/main.go          # app bootstrap, Fyne app + window, wiring
-├── cmd/gorecord/FyneApp.toml     # packaging metadata (app ID, icon, version)
+fanamix/
+├── cmd/fanamix/main.go          # app bootstrap, Fyne app + window, wiring
+├── cmd/fanamix/FyneApp.toml     # packaging metadata (app ID, icon, version)
 ├── internal/audio/               # device layer (malgo): enumerate, open, callbacks
 │   ├── device.go                 # capture/duplex device lifecycle
 │   ├── engine.go                 # transport state machine, timeline, mixing
@@ -413,7 +413,7 @@ All effects are per-track, run in the audio callback, allocation-free after cons
 ### 9.3 Reverb
 - Freeverb-style: 8 parallel comb filters + 4 series allpasses per channel, with damping and room size; stereo output from a mono input.
 - Parameters: room size, damping, pre-delay (0–100 ms), wet/dry mix.
-- Monitor-only or printed per track (see FR-22).
+- Applied on monitoring, take playback and export per track (see FR-22).
 
 ### 9.4 Amp (drive + tone stack)
 - Input gain → pre-emphasis filter → asymmetric waveshaper (soft knee tanh for low drive, harder clipping curve at high drive) → 4× oversampled (to reduce aliasing) → tone stack (bass/mid/treble via three biquads approximating a Fender-style stack) → output level.
@@ -532,7 +532,7 @@ All effects are per-track, run in the audio callback, allocation-free after cons
 |---|---|
 | Go version | 1.25.x (installed: 1.25.1). Avoid libraries requiring 1.26 (e.g. `tphakala/go-wav`). |
 | `CGO_ENABLED` | 1 on all platforms |
-| Module path | `github.com/<owner>/gorecord` (owner decided at publish time) |
+| Module path | `github.com/<owner>/fanamix` (owner decided at publish time) |
 | Dependencies | `fyne.io/fyne/v2` (BSD-3), `github.com/gen2brain/malgo` (Unlicense). Everything else (WAV I/O, DSP, peaks, playback) is written in-repo to keep the dependency surface small and MIT-clean. |
 | Why not `go-audio/wav` | Its encoder takes integer buffers and its float64/float32 decode path is still a TODO; 32-bit float multichannel output needs explicit `WAVE_FORMAT_EXTENSIBLE` support. Own writer is ~300 lines and fully testable. |
 | License | MIT (`LICENSE`, SPDX headers on new files) |
@@ -581,10 +581,10 @@ All effects are per-track, run in the audio callback, allocation-free after cons
 4. **Default for "print effects"**: off for all new tracks (safe default), or inherit the last used value?
 5. **Mixed sample rates**: v1 refuses to record into a session whose sample rate differs from the device. Is refusing right, or should it offer "start a new session at this rate"?
 6. **Session naming**: free text only, or auto-suggest a name from date + first track (e.g. "2026-11-20 guitar idea")?
-7. **Where sessions live**: default `~/Music/gorecord` (proposed) vs a user-chosen root on first run.
+7. **Where sessions live**: default `~/Music/fanamix` (proposed) vs a user-chosen root on first run.
 8. **Multi-channel take with uneven arming mid-session**: if take 1 recorded channels {0,1} and take 2 records {1,2}, is that acceptable (channel map per take) — proposed yes — or should the session fix a channel layout at creation?
 9. **Tuner reference**: fixed A440, or user-selectable 415–445 Hz from v1?
-10. **Repo name and binary name**: confirm `gorecord`, and whether the public repo should carry the same name.
+10. **Repo name and binary name**: confirm `fanamix`, and whether the public repo should carry the same name.
 
 ---
 

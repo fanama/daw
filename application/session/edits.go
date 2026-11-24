@@ -1,6 +1,6 @@
 package sessionapp
 
-import "gorecord/domain/session"
+import "fanamix/domain/session"
 
 // SplitTake cuts one take in two at a session frame.
 func (s *Service) SplitTake(id session.TakeID, atFrame int) (session.Take, error) {

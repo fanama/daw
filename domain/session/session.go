@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"gorecord/domain/mix"
+	"fanamix/domain/mix"
 )
 
 const (

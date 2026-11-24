@@ -1,4 +1,4 @@
-// gorecord browser page. The Go/wasm core owns the session model; this module
+// fanamix browser page. The Go/wasm core owns the session model; this module
 // renders it, runs the Web Audio transport, and persists audio in IndexedDB.
 
 import * as storage from "./storage.js";
@@ -14,9 +14,11 @@ const App = {
   root: null,
   pcm: new Map(),
   peaks: new Map(),
+  audioTrash: new Map(),
   engine: null,
   monitored: new Set(),
   selectedTrackId: null,
+  selectedTakeId: null,
   frame: 0,
   zoom: 1,
   viewStart: 0,
@@ -39,14 +41,14 @@ const App = {
   outputRefreshToken: 0,
 };
 
-const VOLUME_KEY = "gorecord.masterVolume";
-const OUTPUT_KEY = "gorecord.masterOutputs";
+const VOLUME_KEY = "fanamix.masterVolume";
+const OUTPUT_KEY = "fanamix.masterOutputs";
 
 // Keep a connection open for the launcher. Closing the window closes it and
 // lets the Go server stop; reloads reconnect within the shutdown grace period.
 // Static builds opened without this marker have no live endpoint to poll.
 const appLive = new URLSearchParams(window.location.search).has("desktop")
-  ? new EventSource("/__gorecord/events")
+  ? new EventSource("/__fanamix/events")
   : null;
 if (appLive) appLive.onerror = () => {};
 
@@ -66,14 +68,14 @@ function element(tag, className = "", text = "") {
 }
 
 function coreRequest(op, params = {}) {
-  const raw = window.gorecordCore(JSON.stringify({ op, ...params }));
+  const raw = window.fanamixCore(JSON.stringify({ op, ...params }));
   const result = JSON.parse(raw);
   if (!result.ok) throw new Error(result.error || "The command failed.");
   return result;
 }
 
 function registerPCM(file, audio) {
-  window.gorecordSetPCM(
+  window.fanamixSetPCM(
     file,
     new Uint8Array(audio.samples.buffer, audio.samples.byteOffset, audio.samples.byteLength),
     audio.channels,
@@ -96,24 +98,24 @@ async function loadCore() {
   const go = new Go();
   let instance;
   try {
-    instance = await WebAssembly.instantiateStreaming(fetch("gorecord.wasm"), go.importObject);
+    instance = await WebAssembly.instantiateStreaming(fetch("fanamix.wasm"), go.importObject);
   } catch (error) {
-    const bytes = await (await fetch("gorecord.wasm")).arrayBuffer();
+    const bytes = await (await fetch("fanamix.wasm")).arrayBuffer();
     instance = await WebAssembly.instantiate(bytes, go.importObject);
   }
   go.run(instance.instance);
-  for (let attempt = 0; attempt < 150 && !window.gorecordReady; attempt++) {
+  for (let attempt = 0; attempt < 150 && !window.fanamixReady; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  if (!window.gorecordReady) throw new Error("The session core did not start.");
+  if (!window.fanamixReady) throw new Error("The session core did not start.");
 }
 
 async function boot() {
   if (!window.WebAssembly || !window.indexedDB) {
-    document.getElementById("picker").innerHTML = "<div class=\"card\"><h1>gorecord</h1><p class=\"lead\">This browser needs WebAssembly and IndexedDB to record.</p></div>";
+    document.getElementById("picker").innerHTML = "<div class=\"card\"><h1>fanamix</h1><p class=\"lead\">This browser needs WebAssembly and IndexedDB to record.</p></div>";
     return;
   }
-  window.gorecordHost = {
+  window.fanamixHost = {
     save(root, project, name) {
       App.saving = App.saving.then(() => storage.saveProject(root, project, name)).catch((error) => console.error(error));
     },
@@ -122,7 +124,7 @@ async function boot() {
     await loadCore();
   } catch (error) {
     setStatus(error.message, "error");
-    document.getElementById("picker").innerHTML = `<div class="card"><h1>gorecord</h1><p class="lead">${error.message}</p></div>`;
+    document.getElementById("picker").innerHTML = `<div class="card"><h1>fanamix</h1><p class="lead">${error.message}</p></div>`;
     return;
   }
   bindControls();
@@ -174,6 +176,8 @@ function bindControls() {
     split: splitTakeAtPlayhead,
     copy: copyTakeAtPlayhead,
     paste: pasteTakeAtPlayhead,
+    deleteTake: deleteSelectedTake,
+    undo: undoLastEdit,
     export: exportMix,
     zoomIn: () => zoomTo(App.zoom * 1.5),
     zoomOut: () => zoomTo(App.zoom / 1.5),
@@ -209,6 +213,11 @@ function bindControls() {
   window.addEventListener("keydown", (event) => {
     if (event.target.closest("input, select, textarea, button, summary")) return;
     const key = event.key.toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && key === "z") {
+      event.preventDefault();
+      undoLastEdit();
+      return;
+    }
     if ((event.metaKey || event.ctrlKey) && key === "c") {
       event.preventDefault();
       copyTakeAtPlayhead();
@@ -227,6 +236,11 @@ function bindControls() {
     if (key === "p") togglePlayback();
     if (key === "m") addMarker();
     if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (key === "delete" || key === "backspace") {
+      event.preventDefault();
+      deleteSelectedTake();
+      return;
+    }
     if (key === "s") splitTakeAtPlayhead();
     if (key === "+" || key === "=") zoomTo(App.zoom * 1.5);
     if (key === "-" || key === "_") zoomTo(App.zoom / 1.5);
@@ -241,6 +255,10 @@ function applyState(next) {
   if (!App.selectedTrackId || !next.tracks.some((track) => track.id === App.selectedTrackId)) {
     App.selectedTrackId = next.tracks[0]?.id || null;
   }
+  if (App.selectedTakeId && !next.takes.some((take) => take.id === App.selectedTakeId)) {
+    App.selectedTakeId = null;
+  }
+  restoreAudioTrash(next);
   pruneAudio(next);
   const trackIds = new Set(next.tracks.map((track) => track.id));
   for (const id of [...App.monitored]) if (!trackIds.has(id)) App.monitored.delete(id);
@@ -259,12 +277,59 @@ function pruneAudio(state) {
   const files = new Set(state.takes.map((take) => take.file));
   for (const file of [...App.pcm.keys()]) {
     if (files.has(file)) continue;
+    // Keep the audio reachable so undo can bring a deleted clip back with its
+    // sound; leaving the session flushes the trash from storage.
+    App.audioTrash.set(file, { root: App.root, audio: App.pcm.get(file), peaks: App.peaks.get(file) });
     App.pcm.delete(file);
     App.peaks.delete(file);
-    window.gorecordClearPCM(file);
+    window.fanamixClearPCM(file);
     App.engine?.invalidate(file);
-    if (App.root) storage.deleteTake(App.root, file).catch((error) => console.error(error));
   }
+}
+
+function restoreAudioTrash(state) {
+  for (const take of state.takes) {
+    const kept = App.audioTrash.get(take.file);
+    if (!kept || App.pcm.has(take.file)) continue;
+    App.pcm.set(take.file, kept.audio);
+    if (kept.peaks) App.peaks.set(take.file, kept.peaks);
+    App.audioTrash.delete(take.file);
+  }
+}
+
+function purgeAudioTrash() {
+  for (const [file, kept] of App.audioTrash) {
+    storage.deleteTake(kept.root, file).catch((error) => console.error(error));
+  }
+  App.audioTrash.clear();
+}
+
+function selectedTake() {
+  return App.state?.takes.find((take) => take.id === App.selectedTakeId) || null;
+}
+
+async function deleteTake(takeId) {
+  if (!App.state || App.recording) return;
+  const take = App.state.takes.find((candidate) => candidate.id === takeId);
+  if (!take) return;
+  const position = App.state.takes.filter((candidate) => candidate.trackId === take.trackId).indexOf(take) + 1;
+  if (!window.confirm(`Delete take ${position}?`)) return;
+  if (App.playing) stopTransport();
+  const result = await dispatch("take.delete", { takeId });
+  if (result) setStatus("Take deleted — Ctrl/Cmd+Z restores it");
+}
+
+async function deleteSelectedTake() {
+  const take = selectedTake();
+  if (!take) return setStatus("Select a clip in the timeline to delete it.", "error");
+  await deleteTake(take.id);
+}
+
+async function undoLastEdit() {
+  if (!App.state || App.recording) return;
+  if (App.playing) stopTransport();
+  const result = await dispatch("state.undo");
+  if (result) setStatus("Undone");
 }
 
 function currentTrack() {
@@ -491,7 +556,7 @@ function renderInspector() {
   }
   panel.append(element("h2", "", track.name));
   panel.append(takesSection(track));
-  if (track.source === "input") panel.append(effectsSection(track));
+  panel.append(effectsSection(track));
 }
 
 function takesSection(track) {
@@ -522,9 +587,7 @@ function takeRow(track, take, index) {
   normalize.addEventListener("click", () => normalizeTake(take));
   const remove = element("button", "", "×");
   remove.title = "Delete this take";
-  remove.addEventListener("click", () => {
-    if (window.confirm(`Delete take ${index + 1}?`)) dispatch("take.delete", { takeId: take.id });
-  });
+  remove.addEventListener("click", () => deleteTake(take.id));
   head.append(active, name, meta, normalize, remove);
   const controls = element("div", "take-controls");
   const muteLabel = document.createElement("label");
@@ -579,14 +642,14 @@ async function normalizeTake(take) {
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
-    window.gorecordClearPCM(take.file);
+    window.fanamixClearPCM(take.file);
   }
 }
 
 function effectsSection(track) {
   const section = element("div");
   const head = element("div", "fx-heading");
-  head.append(element("h3", "", "Monitor effects"));
+  head.append(element("h3", "", "Effects"));
   const actions = element("span", "fx-actions");
   const file = document.createElement("input");
   file.type = "file";
@@ -605,7 +668,7 @@ function effectsSection(track) {
   });
   const save = element("button", "", "Download");
   save.type = "button";
-  save.title = "Download these monitor effects as a JSON preset";
+  save.title = "Download these effects as a JSON preset";
   save.addEventListener("click", () => downloadEffects(track));
   actions.append(load, save);
   head.append(actions, file);
@@ -1135,9 +1198,17 @@ function startTimelinePointer(event) {
   const canvas = event.currentTarget;
   const point = timelinePoint(event);
   const clip = clipAt(canvas, point.x, point.y);
-  if (!clip) return seekFromPointer(event);
+  if (!clip) {
+    if (App.selectedTakeId) {
+      App.selectedTakeId = null;
+      drawTimelineNow();
+    }
+    return seekFromPointer(event);
+  }
   event.preventDefault();
+  App.selectedTakeId = clip.takeId;
   if (App.selectedTrackId !== clip.trackId) selectTrack(clip.trackId);
+  else drawTimelineNow();
   App.drag = {
     pointerId: event.pointerId,
     canvas,
@@ -1283,14 +1354,14 @@ async function exportMix() {
   await nextPaint();
   try {
     const result = coreRequest("export");
-    const bytes = window.gorecordExportWAV();
+    const bytes = window.fanamixExportWAV();
     if (!bytes) throw new Error("The mix could not be rendered.");
     download(`${App.state.name}.wav`, bytes);
     setStatus(`Exported ${formatDuration(result.frames / App.state.sampleRate)}`);
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
-    for (const { take } of selection) window.gorecordClearPCM(take.file);
+    for (const { take } of selection) window.fanamixClearPCM(take.file);
   }
 }
 
@@ -1337,6 +1408,7 @@ function drawTimelineNow() {
     live,
     lanes: timelineLanes(canvas),
     frame: App.frame,
+    selectedTakeId: App.selectedTakeId,
     zoom: App.zoom,
     startFrame: App.viewStart,
     follow: App.playing || App.recording,
@@ -1500,6 +1572,7 @@ async function openSession(root) {
     if (!record) throw new Error("That session could not be found.");
     const result = coreRequest("open", { root, project: record.project });
     const takes = await storage.loadTakes(root);
+    purgeAudioTrash();
     disposeEngine();
     App.monitored = new Set(result.state.tracks.filter((track) => track.armed).map((track) => track.id));
     App.pcm = new Map(takes.map((take) => [take.file, { channels: take.channels, sampleRate: take.sampleRate, samples: take.samples }]));
@@ -1509,9 +1582,13 @@ async function openSession(root) {
     App.recording = false;
     App.pendingTake = null;
     App.selectedTrackId = null;
+    App.selectedTakeId = null;
     App.zoom = 1;
     App.viewStart = 0;
     applyState(result.state);
+    // A freshly opened project has no undo history, so any audio it does not
+    // reference is an orphan from an earlier visit and can be dropped.
+    purgeAudioTrash();
     syncControls();
     document.getElementById("picker").hidden = true;
     document.getElementById("app").hidden = false;
@@ -1528,6 +1605,7 @@ async function createSession(name, sampleRate) {
   }
   try {
     const result = coreRequest("create", { name, sampleRate });
+    purgeAudioTrash();
     disposeEngine();
     App.monitored = new Set();
     App.pcm = new Map();
@@ -1537,9 +1615,13 @@ async function createSession(name, sampleRate) {
     App.recording = false;
     App.pendingTake = null;
     App.selectedTrackId = null;
+    App.selectedTakeId = null;
     App.zoom = 1;
     App.viewStart = 0;
     applyState(result.state);
+    // A freshly opened project has no undo history, so any audio it does not
+    // reference is an orphan from an earlier visit and can be dropped.
+    purgeAudioTrash();
     syncControls();
     document.getElementById("picker").hidden = true;
     document.getElementById("app").hidden = false;
@@ -1552,6 +1634,9 @@ async function createSession(name, sampleRate) {
 async function deleteSession(session) {
   if (!window.confirm(`Delete session "${session.name}" and all its audio?`)) return;
   await storage.deleteSession(session.root);
+  for (const [file, kept] of App.audioTrash) {
+    if (kept.root === session.root) App.audioTrash.delete(file);
+  }
   if (App.root === session.root) {
     disposeEngine();
     App.state = null;

@@ -1,6 +1,6 @@
 package dsp
 
-import "gorecord/domain/mix"
+import "fanamix/domain/mix"
 
 type eqStage struct {
 	bands   [5]biquad

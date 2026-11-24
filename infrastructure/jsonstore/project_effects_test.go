@@ -3,7 +3,7 @@ package jsonstore
 import (
 	"testing"
 
-	"gorecord/domain/mix"
+	"fanamix/domain/mix"
 )
 
 func TestEffectsToDomainMigratesThreeBandEQ(t *testing.T) {

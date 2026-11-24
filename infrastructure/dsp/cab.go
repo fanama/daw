@@ -1,6 +1,6 @@
 package dsp
 
-import "gorecord/domain/mix"
+import "fanamix/domain/mix"
 
 // cabStage approximates a guitar speaker cabinet: no low end below ~80 Hz, a
 // resonant body, and a rolled-off top. It is deliberately a fixed filter so a

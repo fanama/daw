@@ -38,4 +38,4 @@ class CaptureProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor("gorecord-capture", CaptureProcessor);
+registerProcessor("fanamix-capture", CaptureProcessor);

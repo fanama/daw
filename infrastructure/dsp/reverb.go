@@ -1,6 +1,6 @@
 package dsp
 
-import "gorecord/domain/mix"
+import "fanamix/domain/mix"
 
 var combTunings = [4]int{1116, 1188, 1277, 1356}
 var allPassTunings = [2]int{556, 441}

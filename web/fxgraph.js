@@ -1,4 +1,4 @@
-// SVG response graphs for the monitor EQ and compressor. The EQ curve mirrors
+// SVG response graphs for the track EQ and compressor. The EQ curve mirrors
 // the Web Audio peaking biquads; the compressor graph shows the level transfer
 // curve, since compression is gain-based rather than frequency-based.
 

@@ -1,4 +1,4 @@
-// Command gorecord serves the browser build on localhost and opens it as a
+// Command fanamix serves the browser build on localhost and opens it as a
 // desktop app window (or in the default browser).
 package main
 
@@ -20,7 +20,7 @@ import (
 
 const (
 	appPath       = "/app.html"
-	livePath      = "/__gorecord/events"
+	livePath      = "/__fanamix/events"
 	liveGrace     = 2 * time.Second
 	liveHeartbeat = 15 * time.Second
 )
@@ -41,7 +41,7 @@ func main() {
 		log.Fatalf("listen on %s: %v", *addr, err)
 	}
 	url := appURL(listener.Addr())
-	log.Printf("gorecord: %s", url)
+	log.Printf("fanamix: %s", url)
 	quit := make(chan struct{})
 	var once sync.Once
 	shutdown := func() {
@@ -130,7 +130,7 @@ func resolveWebDir(configured string) (string, error) {
 // requireBuild checks the generated files before the server starts, so a
 // missing wasm build fails with a build hint instead of a blank page.
 func requireBuild(root string) error {
-	for _, name := range []string{"index.html", "app.html", "gorecord.wasm", "wasm_exec.js"} {
+	for _, name := range []string{"index.html", "app.html", "fanamix.wasm", "wasm_exec.js"} {
 		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
 			return fmt.Errorf("%s is missing from %s", name, root)
 		}

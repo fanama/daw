@@ -4,7 +4,7 @@ import (
 	"math"
 	"strings"
 
-	"gorecord/domain/mix"
+	"fanamix/domain/mix"
 )
 
 // Track is one recorded part: an audio source with its own effect chain and an
@@ -38,11 +38,15 @@ func NewTrackWithSource(id TrackID, name string, source Source) (Track, error) {
 	if err != nil {
 		return Track{}, err
 	}
+	effects := mix.DefaultEffects()
+	if normalized.IsSystem() {
+		effects = mix.DryEffects()
+	}
 	return Track{
 		id:      id,
 		name:    cleanName,
 		source:  normalized,
-		effects: mix.DefaultEffects(),
+		effects: effects,
 	}, nil
 }
 

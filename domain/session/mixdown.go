@@ -1,8 +1,12 @@
 package session
 
-// AudibleTake is a take the monitor bus should play, with its resolved gain.
+import "fanamix/domain/mix"
+
+// AudibleTake is a take the monitor bus should play, with its resolved gain
+// and the track effects heard on playback and export.
 type AudibleTake struct {
-	Take Take
+	Take    Take
+	Effects mix.Effects
 }
 
 // AudibleTakes resolves mute, solo and active-take selection into the set of
@@ -21,7 +25,7 @@ func (s *Session) AudibleTakes() []AudibleTake {
 			if take.id != track.activeTakeID && !take.layered {
 				continue
 			}
-			audible = append(audible, AudibleTake{Take: take})
+			audible = append(audible, AudibleTake{Take: take, Effects: track.effects})
 		}
 	}
 	return audible

@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 const projectFileName = "project.json"

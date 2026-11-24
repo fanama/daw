@@ -3,7 +3,7 @@ package dsp
 import (
 	"math"
 
-	"gorecord/domain/mix"
+	"fanamix/domain/mix"
 )
 
 // oversamplingFactor is the number of interpolated subsamples fed to the

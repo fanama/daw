@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"gorecord/domain/mix"
-	"gorecord/infrastructure/dsp"
+	"fanamix/domain/mix"
+	"fanamix/infrastructure/dsp"
 )
 
 func measureGainDB(t *testing.T, chain *dsp.Chain, frequency, sampleRate float64) float64 {

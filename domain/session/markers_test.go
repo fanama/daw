@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 func TestAddMarkerClampsAndNames(t *testing.T) {

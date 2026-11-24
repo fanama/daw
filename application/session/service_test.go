@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	sessionapp "gorecord/application/session"
-	"gorecord/infrastructure/jsonstore"
-	"gorecord/infrastructure/wavio"
+	sessionapp "fanamix/application/session"
+	"fanamix/infrastructure/jsonstore"
+	"fanamix/infrastructure/wavio"
 )
 
 func newService(t *testing.T) *sessionapp.Service {

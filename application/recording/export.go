@@ -4,8 +4,9 @@ import (
 	"errors"
 	"math"
 
-	"gorecord/domain/session"
-	"gorecord/domain/studio"
+	"fanamix/domain/mix"
+	"fanamix/domain/session"
+	"fanamix/domain/studio"
 )
 
 const exportChunkFrames = 8192
@@ -19,16 +20,23 @@ type ExportResult struct {
 }
 
 // MixdownExporter renders the audible takes into one stereo WAV file. Like the
-// monitor bus it applies mute, solo, active-take selection, take gain and trim,
-// and soft-clips the sum.
+// monitor bus it applies mute, solo, active-take selection, take gain, track
+// effects and trim, then soft-clips the sum.
 type MixdownExporter struct {
 	loader *Loader
 	files  session.Mixdowns
 }
 
-// NewMixdownExporter wires the exporter to take audio and mixdown files.
+// NewMixdownExporter wires the exporter to take audio and mixdown files without
+// processing effects.
 func NewMixdownExporter(takes session.TakeFiles, files session.Mixdowns) *MixdownExporter {
 	return &MixdownExporter{loader: NewLoader(takes), files: files}
+}
+
+// NewMixdownExporterWithProcessor bakes each track's effect chain into the
+// rendered mix so the download matches what playback sounds like.
+func NewMixdownExporterWithProcessor(takes session.TakeFiles, files session.Mixdowns, factory mix.ProcessorFactory) *MixdownExporter {
+	return &MixdownExporter{loader: NewLoaderWithProcessor(takes, factory), files: files}
 }
 
 // Export mixes the audible takes into path as a stereo float WAV.

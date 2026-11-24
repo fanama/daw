@@ -3,7 +3,7 @@ package malgoengine
 import (
 	"errors"
 
-	"gorecord/domain/studio"
+	"fanamix/domain/studio"
 )
 
 // StartRecording arms the capture path and starts the backing transport.

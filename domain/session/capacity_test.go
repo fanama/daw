@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"gorecord/domain/mix"
-	"gorecord/domain/session"
+	"fanamix/domain/mix"
+	"fanamix/domain/session"
 )
 
 func TestCapacityLevelsFollowTheCeiling(t *testing.T) {

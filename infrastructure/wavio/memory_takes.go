@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"path"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 // MemoryTakes keeps take audio in memory. The browser build records with the

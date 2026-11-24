@@ -6,7 +6,7 @@ import (
 	"path"
 	"path/filepath"
 
-	"gorecord/domain/session"
+	"fanamix/domain/session"
 )
 
 // TakeFiles stores take audio inside a session folder.

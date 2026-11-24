@@ -4,14 +4,15 @@ import (
 	"errors"
 	"time"
 
-	"gorecord/domain/mix"
-	"gorecord/domain/session"
+	"fanamix/domain/mix"
+	"fanamix/domain/session"
 )
 
-// SchemaVersion is the project file version this build writes. Version 3 adds
-// layered take segments; version 2 stores the five-band equalizer; version 1
-// projects are migrated when loaded.
-const SchemaVersion = 3
+// SchemaVersion is the project file version this build writes. Version 4 lets
+// PC audio tracks carry their own effects; version 3 adds layered take
+// segments; version 2 stores the five-band equalizer; version 1 projects are
+// migrated when loaded.
+const SchemaVersion = 4
 
 // ErrUnsupportedSchema is returned when a project was written by a newer app.
 var ErrUnsupportedSchema = errors.New("jsonstore: project schema is newer than this app")
@@ -94,7 +95,7 @@ type projectJSON struct {
 func projectFromState(state session.State) projectJSON {
 	return projectJSON{
 		SchemaVersion: SchemaVersion,
-		App:           appJSON{Name: "gorecord", Version: "0.1.0"},
+		App:           appJSON{Name: "fanamix", Version: "0.1.0"},
 		Session:       sessionFromState(state),
 		Tracks:        tracksFromState(state.Tracks),
 		Takes:         takesFromState(state.Takes),
@@ -172,7 +173,7 @@ func stateFromProject(project projectJSON) (session.State, error) {
 	if project.SchemaVersion > SchemaVersion {
 		return session.State{}, ErrUnsupportedSchema
 	}
-	return session.State{
+	state := session.State{
 		Name:          project.Session.Name,
 		CreatedAt:     project.Session.CreatedAt,
 		SampleRate:    project.Session.SampleRate,
@@ -184,7 +185,19 @@ func stateFromProject(project projectJSON) (session.State, error) {
 		NextTrack:     project.Session.NextTrack,
 		NextTake:      project.Session.NextTake,
 		NextMarker:    project.Session.NextMarker,
-	}, nil
+	}
+	if project.SchemaVersion < 4 {
+		// PC audio used to be monitored dry and could not carry effects. Old
+		// projects store the guitar defaults there; start those tracks dry.
+		for index := range state.Tracks {
+			if !state.Tracks[index].Source.IsSystem() {
+				continue
+			}
+			state.Tracks[index].Effects = mix.DryEffects()
+			state.Tracks[index].PrintEffects = false
+		}
+	}
+	return state, nil
 }
 
 func tracksToState(tracks []trackJSON) []session.TrackState {

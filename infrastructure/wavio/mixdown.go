@@ -1,6 +1,6 @@
 package wavio
 
-import "gorecord/domain/session"
+import "fanamix/domain/session"
 
 // Mixdowns creates stereo float WAV files for mixdown export.
 type Mixdowns struct{}

@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"gorecord/domain/mix"
+	"fanamix/domain/mix"
 )
 
 // AddTrack appends a track bound to one interface channel.
@@ -147,9 +147,6 @@ func (s *Session) SetEffects(id TrackID, effects mix.Effects) error {
 	index, err := s.trackIndex(id)
 	if err != nil {
 		return err
-	}
-	if s.tracks[index].source.IsSystem() {
-		return invalid("PC audio has no per-track effect chain")
 	}
 	s.tracks[index].effects = effects.Normalize()
 	return nil

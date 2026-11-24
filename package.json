@@ -1,8 +1,8 @@
 {
-  "name": "gorecord",
+  "name": "fanamix",
   "version": "0.1.0",
   "private": true,
-  "description": "Static browser build of gorecord",
+  "description": "Static browser build of fanamix",
   "engines": {
     "node": ">=20.19"
   },

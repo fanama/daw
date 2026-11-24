@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"gorecord/domain/mix"
-	"gorecord/domain/session"
-	"gorecord/infrastructure/jsonstore"
+	"fanamix/domain/mix"
+	"fanamix/domain/session"
+	"fanamix/infrastructure/jsonstore"
 )
 
 func TestEncodeStateRoundTripsTheProject(t *testing.T) {

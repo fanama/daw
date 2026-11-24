@@ -3,8 +3,9 @@ package recording
 import (
 	"errors"
 
-	"gorecord/domain/session"
-	"gorecord/domain/studio"
+	"fanamix/domain/mix"
+	"fanamix/domain/session"
+	"fanamix/domain/studio"
 )
 
 // PlaybackBudgetBytes caps how much take audio is preloaded for monitoring.
@@ -15,11 +16,18 @@ const preloadChunkFrames = 8192
 
 // Loader builds the monitor mix from the session's audible takes.
 type Loader struct {
-	takes session.TakeFiles
+	takes   session.TakeFiles
+	factory mix.ProcessorFactory
 }
 
-// NewLoader wires the loader to the take-file port.
+// NewLoader wires the loader to the take-file port without processing.
 func NewLoader(takes session.TakeFiles) *Loader { return &Loader{takes: takes} }
+
+// NewLoaderWithProcessor runs every take through its track's effect chain, so
+// playback and export carry the same sound as the monitors.
+func NewLoaderWithProcessor(takes session.TakeFiles, factory mix.ProcessorFactory) *Loader {
+	return &Loader{takes: takes, factory: factory}
+}
 
 // Load reads the audible takes into memory and maps them onto the timeline.
 func (l *Loader) Load(root string, audible []session.AudibleTake) (studio.PlaybackMix, error) {
@@ -35,6 +43,9 @@ func (l *Loader) Load(root string, audible []session.AudibleTake) (studio.Playba
 		_ = audio.Close()
 		if readErr != nil {
 			return studio.PlaybackMix{}, readErr
+		}
+		if l.factory != nil && !entry.Effects.Bypassed() {
+			loaded.Samples = applyEffects(l.factory, loaded.Samples, loaded.Channels, take.SampleRate(), entry.Effects)
 		}
 		totalBytes += bytes
 		if totalBytes > PlaybackBudgetBytes {
@@ -73,4 +84,31 @@ func readTake(audio session.TakeAudio, take session.Take) (studio.PlaybackTake, 
 		Length:     cursor,
 		GainDB:     take.GainDB(),
 	}, len(samples) * 4, nil
+}
+
+// applyEffects filters each channel through a fresh mono chain. Stereo PC takes
+// therefore receive the same per-track configuration as mono inputs.
+func applyEffects(factory mix.ProcessorFactory, samples []float32, channels, sampleRate int, effects mix.Effects) []float32 {
+	if channels < 1 {
+		return samples
+	}
+	frames := len(samples) / channels
+	if frames == 0 {
+		return samples
+	}
+	output := make([]float32, len(samples))
+	mono := make([]float32, frames)
+	for channel := 0; channel < channels; channel++ {
+		processor := factory.NewProcessor()
+		processor.Prepare(sampleRate)
+		processor.SetEffects(effects)
+		for frame := 0; frame < frames; frame++ {
+			mono[frame] = samples[frame*channels+channel]
+		}
+		processor.ProcessMono(mono)
+		for frame := 0; frame < frames; frame++ {
+			output[frame*channels+channel] = mono[frame]
+		}
+	}
+	return output
 }

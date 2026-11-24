@@ -1,6 +1,8 @@
 // Local persistence for the browser build: project JSON and take audio live
 // in IndexedDB, which is the browser counterpart of the session folder.
 
+// Kept from the previous app name so projects recorded before the rename stay
+// visible in the browser.
 const DATABASE_NAME = "gorecord-browser";
 const DATABASE_VERSION = 1;
 

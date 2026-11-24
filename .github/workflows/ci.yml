@@ -27,4 +27,4 @@ jobs:
       - name: Test
         run: go test ./...
       - name: Browser build
-        run: GOOS=js GOARCH=wasm go build -o gorecord.wasm ./webapp
+        run: GOOS=js GOARCH=wasm go build -o fanamix.wasm ./webapp

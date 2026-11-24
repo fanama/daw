@@ -3,7 +3,7 @@ package malgoengine
 import (
 	"math"
 
-	"gorecord/domain/studio"
+	"fanamix/domain/studio"
 )
 
 // mixPlayback sums the preloaded takes onto the stereo monitor bus at the

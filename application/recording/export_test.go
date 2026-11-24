@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"gorecord/application/recording"
-	sessionapp "gorecord/application/session"
-	"gorecord/domain/session"
-	"gorecord/infrastructure/jsonstore"
-	"gorecord/infrastructure/wavio"
+	"fanamix/application/recording"
+	sessionapp "fanamix/application/session"
+	"fanamix/domain/session"
+	"fanamix/infrastructure/jsonstore"
+	"fanamix/infrastructure/wavio"
 )
 
 func newExportSession(t *testing.T, frames int) (*sessionapp.Service, *session.Session, session.Take) {

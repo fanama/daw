@@ -140,7 +140,7 @@ function reverbImpulse(context, size, damp) {
 }
 
 // buildEffectsChain returns a node with one input and one output. Callers
-// connect it into the monitor path and dispose it when the track changes.
+// connect it into monitoring and playback and dispose it when the track changes.
 export function buildEffectsChain(context, effects) {
   const input = context.createGain();
   const nodes = [input];

@@ -1,6 +1,6 @@
 package studio
 
-import "gorecord/domain/mix"
+import "fanamix/domain/mix"
 
 // State is the transport state of the engine.
 type State int

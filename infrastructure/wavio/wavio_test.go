@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gorecord/infrastructure/wavio"
+	"fanamix/infrastructure/wavio"
 )
 
 func TestWriterReaderRoundTrip(t *testing.T) {
