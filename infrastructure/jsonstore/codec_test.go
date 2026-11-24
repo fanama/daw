@@ -68,3 +68,40 @@ func TestEncodeStateRoundTripsTheProject(t *testing.T) {
 		t.Fatalf("unexpected markers: %+v", markers)
 	}
 }
+
+func TestEncodeStateKeepsSplitSegments(t *testing.T) {
+	current, err := session.New("Split segments", 48000, time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	track, err := current.AddTrack("Mic", 1)
+	if err != nil {
+		t.Fatalf("add track: %v", err)
+	}
+	take, err := current.AddTake(track.ID(), "takes/take-001.wav", 0, 1, 48000, false, false, time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("add take: %v", err)
+	}
+	if err := current.CompleteTake(take.ID(), 2000); err != nil {
+		t.Fatalf("complete take: %v", err)
+	}
+	if _, err := current.SplitTake(take.ID(), 800, time.Unix(0, 0)); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+
+	encoded, err := jsonstore.EncodeState(current.State())
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	restored, err := jsonstore.RestoreSession(encoded)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	takes := restored.Takes()
+	if len(takes) != 2 {
+		t.Fatalf("expected two segments, got %d", len(takes))
+	}
+	if !takes[1].IsLayered() || takes[1].StartFrame() != 800 || takes[1].Trim().StartFrame != 800 {
+		t.Fatalf("split segment did not round-trip: %+v", takes[1])
+	}
+}

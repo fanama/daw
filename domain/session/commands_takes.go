@@ -116,6 +116,92 @@ func (s *Session) SetTakeMute(id TakeID, muted bool) error {
 	return nil
 }
 
+// SplitTake cuts one take in two at a session frame. The halves share the
+// recorded file and play back to back.
+func (s *Session) SplitTake(id TakeID, atFrame int, now time.Time) (Take, error) {
+	index, err := s.takeIndex(id)
+	if err != nil {
+		return Take{}, err
+	}
+	source := s.takes[index]
+	if atFrame <= source.StartFrame() || atFrame >= source.EndFrame() {
+		return Take{}, invalid("split frame must fall inside take %s", id)
+	}
+	offset := source.trim.StartFrame + (atFrame - source.StartFrame())
+	second := source
+	second.id = TakeID(fmt.Sprintf("tk_%d", s.nextTake))
+	second.startFrame = atFrame
+	second.trim = Trim{StartFrame: offset, EndFrame: source.trim.EndFrame}
+	second.layered = source.layered || s.isActiveTake(source)
+	second.createdAt = now.UTC()
+	s.nextTake++
+	source.trim.EndFrame = offset
+	s.takes[index] = source
+	s.insertTake(index+1, second)
+	return second, nil
+}
+
+// DuplicateTake copies a take's audio window onto a track at a new position.
+// The copy shares the recorded file and plays alongside the active take.
+func (s *Session) DuplicateTake(id TakeID, trackID TrackID, startFrame int, now time.Time) (Take, error) {
+	index, err := s.takeIndex(id)
+	if err != nil {
+		return Take{}, err
+	}
+	trackIndex, err := s.trackIndex(trackID)
+	if err != nil {
+		return Take{}, err
+	}
+	if startFrame < 0 {
+		return Take{}, invalid("take start frame cannot be negative")
+	}
+	duplicate := s.takes[index]
+	duplicate.id = TakeID(fmt.Sprintf("tk_%d", s.nextTake))
+	duplicate.trackID = trackID
+	duplicate.startFrame = startFrame
+	duplicate.layered = !s.tracks[trackIndex].activeTakeID.IsZero()
+	duplicate.createdAt = now.UTC()
+	s.nextTake++
+	s.takes = append(s.takes, duplicate)
+	s.activateIfEmpty(trackID, duplicate.id)
+	return duplicate, nil
+}
+
+// MoveTake places a take at a new session frame without touching its audio.
+func (s *Session) MoveTake(id TakeID, startFrame int) error {
+	index, err := s.takeIndex(id)
+	if err != nil {
+		return err
+	}
+	if startFrame < 0 {
+		return invalid("take start frame cannot be negative")
+	}
+	s.takes[index].startFrame = startFrame
+	return nil
+}
+
+// TakeFileInUse reports whether a take still references this audio file, so
+// deleting one segment never removes audio the others still play.
+func (s *Session) TakeFileInUse(file string) bool {
+	for _, take := range s.takes {
+		if take.file == file {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Session) isActiveTake(take Take) bool {
+	index, err := s.trackIndex(take.trackID)
+	return err == nil && s.tracks[index].activeTakeID == take.id
+}
+
+func (s *Session) insertTake(index int, take Take) {
+	s.takes = append(s.takes, Take{})
+	copy(s.takes[index+1:], s.takes[index:])
+	s.takes[index] = take
+}
+
 // RemoveTake deletes a take from the session and returns it so its audio can
 // be moved to the trash.
 func (s *Session) RemoveTake(id TakeID) (Take, error) {

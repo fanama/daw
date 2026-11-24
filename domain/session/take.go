@@ -28,6 +28,7 @@ type Take struct {
 	printed      bool
 	incomplete   bool
 	muted        bool
+	layered      bool
 	trim         Trim
 	gainDB       float64
 	createdAt    time.Time
@@ -66,6 +67,10 @@ func (t Take) IsIncomplete() bool { return t.incomplete }
 // IsMuted reports whether this individual take is muted.
 func (t Take) IsMuted() bool { return t.muted }
 
+// IsLayered reports whether the take plays alongside the track's active take,
+// like the second half of a split or a pasted copy.
+func (t Take) IsLayered() bool { return t.layered }
+
 // Trim returns the non-destructive in/out points.
 func (t Take) Trim() Trim { return t.trim }
 
@@ -99,6 +104,7 @@ func (t Take) state() TakeState {
 		Printed:      t.printed,
 		Incomplete:   t.incomplete,
 		Muted:        t.muted,
+		Layered:      t.layered,
 		Trim:         t.trim,
 		GainDB:       t.gainDB,
 		CreatedAt:    t.createdAt,
@@ -132,6 +138,7 @@ func takeFromState(state TakeState) (Take, error) {
 		printed:      state.Printed,
 		incomplete:   state.Incomplete,
 		muted:        state.Muted,
+		layered:      state.Layered,
 		trim:         state.Trim,
 		gainDB:       state.GainDB,
 		createdAt:    state.CreatedAt.UTC(),

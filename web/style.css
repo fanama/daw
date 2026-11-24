@@ -224,6 +224,51 @@ button.record::before { content: "●"; }
 .output-empty { margin: 4px 0; color: var(--muted); font-size: 12px; }
 .output-hint { margin: 9px 2px 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
 
+.shortcut-panel { width: 268px; padding: 10px; }
+.shortcut-panel button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  border-radius: 7px;
+  font-size: 12px;
+  text-align: left;
+}
+.shortcut-panel button:hover { background: var(--panel-3); }
+.shortcut-panel kbd {
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 3px 5px;
+  background: #0e131b;
+  white-space: nowrap;
+}
+.shortcut-head {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 2px 6px;
+}
+.shortcut-note {
+  margin: 8px 4px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.shortcut-note kbd {
+  font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 4px;
+  background: #0e131b;
+}
+
 .actions {
   margin-left: auto;
   display: flex;
@@ -421,7 +466,7 @@ button.mini {
 }
 
 .timeline { position: relative; min-width: 0; min-height: 0; background: #0d1118; }
-#timeline { width: 100%; height: 100%; display: block; cursor: text; }
+#timeline { width: 100%; height: 100%; display: block; cursor: text; touch-action: none; }
 
 .inspector h2 { margin-bottom: 10px; }
 .inspector h3 {
@@ -520,7 +565,7 @@ button.mini {
   stroke: #090d13;
   stroke-width: 2;
 }
-.fx-graph .spectrum { opacity: 0.9; }
+.fx-graph .spectrum { opacity: 0.7; }
 .fx-graph .spectrum-line {
   fill: none;
   stroke: #7aa7ff;

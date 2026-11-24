@@ -8,14 +8,15 @@ export function takeLength(take) {
 export function audibleTakes(state) {
   const selection = [];
   for (const track of state.tracks) {
-    if (track.muted || (state.anySolo && !track.soloed) || !track.activeTakeId) {
+    if (track.muted || (state.anySolo && !track.soloed)) {
       continue;
     }
-    const take = state.takes.find((candidate) => candidate.id === track.activeTakeId);
-    if (!take || take.muted || takeLength(take) === 0) {
-      continue;
+    for (const take of state.takes) {
+      if (take.trackId !== track.id || take.muted) continue;
+      if (take.id !== track.activeTakeId && !take.layered) continue;
+      if (takeLength(take) === 0) continue;
+      selection.push({ track, take });
     }
-    selection.push({ track, take });
   }
   return selection;
 }

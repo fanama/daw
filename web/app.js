@@ -3,7 +3,7 @@
 
 import * as storage from "./storage.js";
 import { AudioEngine } from "./audio.js";
-import { computePeaks, drawTimeline, frameAtX, markerAtX } from "./waveform.js";
+import { clipAt, computePeaks, drawTimeline, frameAtX, markerAtX } from "./waveform.js";
 import { audibleTakes, formatDuration, takeLength } from "./model.js";
 import { effectGraph } from "./fxgraph.js";
 import { effectsFromPreset, effectsToPreset } from "./effects-preset.js";
@@ -18,10 +18,14 @@ const App = {
   monitored: new Set(),
   selectedTrackId: null,
   frame: 0,
+  zoom: 1,
+  viewStart: 0,
   playing: false,
   recording: false,
   countingIn: false,
   pendingTake: null,
+  clipboard: null,
+  drag: null,
   rafHandle: 0,
   sessions: [],
   saving: Promise.resolve(),
@@ -157,8 +161,30 @@ function bindControls() {
   refreshOutputs();
   document.getElementById("btn-output-rescan").addEventListener("click", () => refreshOutputs());
   const outputMenu = document.getElementById("master-output");
+  const shortcutMenu = document.getElementById("shortcut-menu");
   document.addEventListener("pointerdown", (event) => {
     if (outputMenu.open && !outputMenu.contains(event.target)) outputMenu.open = false;
+    if (shortcutMenu.open && !shortcutMenu.contains(event.target)) shortcutMenu.open = false;
+  });
+  const shortcutActions = {
+    record: toggleRecord,
+    play: togglePlayback,
+    stop: () => (App.recording ? stopRecording() : stopTransport()),
+    marker: addMarker,
+    split: splitTakeAtPlayhead,
+    copy: copyTakeAtPlayhead,
+    paste: pasteTakeAtPlayhead,
+    export: exportMix,
+    zoomIn: () => zoomTo(App.zoom * 1.5),
+    zoomOut: () => zoomTo(App.zoom / 1.5),
+    resetZoom,
+  };
+  shortcutMenu.querySelectorAll("[data-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      shortcutMenu.open = false;
+      button.blur();
+      shortcutActions[button.dataset.action]?.();
+    });
   });
   if (navigator.mediaDevices?.addEventListener) {
     navigator.mediaDevices.addEventListener("devicechange", () => refreshOutputs());
@@ -166,8 +192,14 @@ function bindControls() {
   document.getElementById("click-enabled").addEventListener("change", pushClick);
   document.getElementById("click-bpm").addEventListener("change", pushClick);
   document.getElementById("count-in").addEventListener("change", pushClick);
-  document.getElementById("timeline").addEventListener("pointerdown", seekFromPointer);
-  document.getElementById("timeline").addEventListener("contextmenu", deleteMarkerAt);
+  const timeline = document.getElementById("timeline");
+  timeline.addEventListener("pointerdown", startTimelinePointer);
+  timeline.addEventListener("pointermove", moveTimelinePointer);
+  timeline.addEventListener("pointerup", (event) => finishTimelinePointer(event, false));
+  timeline.addEventListener("pointercancel", (event) => finishTimelinePointer(event, true));
+  timeline.addEventListener("contextmenu", deleteMarkerAt);
+  timeline.addEventListener("wheel", zoomTimeline, { passive: false });
+  document.getElementById("track-list").addEventListener("scroll", drawTimelineNow, { passive: true });
   document.getElementById("new-session").addEventListener("submit", (event) => {
     event.preventDefault();
     const name = document.getElementById("session-name-input").value.trim();
@@ -176,13 +208,29 @@ function bindControls() {
   window.addEventListener("resize", drawTimelineNow);
   window.addEventListener("keydown", (event) => {
     if (event.target.closest("input, select, textarea, button, summary")) return;
+    const key = event.key.toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && key === "c") {
+      event.preventDefault();
+      copyTakeAtPlayhead();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && key === "v") {
+      event.preventDefault();
+      pasteTakeAtPlayhead();
+      return;
+    }
     if (event.code === "Space") {
       event.preventDefault();
       togglePlayback();
     }
-    if (event.key.toLowerCase() === "r") toggleRecord();
-    if (event.key.toLowerCase() === "p") togglePlayback();
-    if (event.key.toLowerCase() === "m") addMarker();
+    if (key === "r") toggleRecord();
+    if (key === "p") togglePlayback();
+    if (key === "m") addMarker();
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (key === "s") splitTakeAtPlayhead();
+    if (key === "+" || key === "=") zoomTo(App.zoom * 1.5);
+    if (key === "-" || key === "_") zoomTo(App.zoom / 1.5);
+    if (key === "0") resetZoom();
   });
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 }
@@ -1077,6 +1125,73 @@ function addMarker() {
   dispatch("marker.add", { frame: Math.round(App.frame), name });
 }
 
+function timelinePoint(event) {
+  const box = event.currentTarget.getBoundingClientRect();
+  return { x: event.clientX - box.left, y: event.clientY - box.top };
+}
+
+function startTimelinePointer(event) {
+  if (event.button !== 0) return;
+  const canvas = event.currentTarget;
+  const point = timelinePoint(event);
+  const clip = clipAt(canvas, point.x, point.y);
+  if (!clip) return seekFromPointer(event);
+  event.preventDefault();
+  if (App.selectedTrackId !== clip.trackId) selectTrack(clip.trackId);
+  App.drag = {
+    pointerId: event.pointerId,
+    canvas,
+    takeId: clip.takeId,
+    originFrame: clip.startFrame,
+    startX: point.x,
+    pxPerFrame: canvas.layout?.pxPerFrame || 1,
+    moved: false,
+  };
+  canvas.setPointerCapture(event.pointerId);
+  canvas.style.cursor = "grabbing";
+}
+
+function moveTimelinePointer(event) {
+  const canvas = event.currentTarget;
+  const drag = App.drag;
+  if (!drag || drag.pointerId !== event.pointerId) {
+    const point = timelinePoint(event);
+    canvas.style.cursor = clipAt(canvas, point.x, point.y) ? "grab" : "text";
+    return;
+  }
+  if (!canvas.hasPointerCapture(event.pointerId)) return;
+  const point = timelinePoint(event);
+  if (Math.abs(point.x - drag.startX) > 2) drag.moved = true;
+  if (!drag.moved) return;
+  const take = App.state?.takes.find((candidate) => candidate.id === drag.takeId);
+  if (!take) return;
+  const delta = Math.round((point.x - drag.startX) / drag.pxPerFrame);
+  take.startFrame = Math.max(0, drag.originFrame + delta);
+  drawTimelineNow();
+}
+
+function finishTimelinePointer(event, cancelled) {
+  const drag = App.drag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  App.drag = null;
+  const canvas = drag.canvas;
+  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  canvas.style.cursor = "text";
+  const take = App.state?.takes.find((candidate) => candidate.id === drag.takeId);
+  if (cancelled || !drag.moved) {
+    if (take) take.startFrame = drag.originFrame;
+    drawTimelineNow();
+    if (!cancelled) seekFromPointer(event);
+    return;
+  }
+  const frame = take ? take.startFrame : drag.originFrame;
+  dispatch("take.move", { takeId: drag.takeId, startFrame: frame }).then((result) => {
+    if (result) return setStatus(`Moved clip to ${formatDuration(frame / App.state.sampleRate)}`);
+    if (take) take.startFrame = drag.originFrame;
+    drawTimelineNow();
+  });
+}
+
 function seekFromPointer(event) {
   if (!App.state) return;
   const canvas = event.currentTarget;
@@ -1105,6 +1220,54 @@ function deleteMarkerAt(event) {
   event.preventDefault();
   if (!window.confirm(`Delete marker "${marker.name}"?`)) return;
   dispatch("marker.remove", { markerId: marker.id });
+}
+
+function takeUnderPlayhead(track) {
+  const frame = Math.round(App.frame);
+  let fallback = null;
+  for (const take of App.state.takes) {
+    if (take.trackId !== track.id || take.muted) continue;
+    const length = takeLength(take);
+    if (length === 0 || frame < take.startFrame || frame >= take.startFrame + length) continue;
+    if (take.id === track.activeTakeId || take.layered) return take;
+    fallback = fallback || take;
+  }
+  return fallback;
+}
+
+async function splitTakeAtPlayhead() {
+  const track = currentTrack();
+  if (!track || App.recording) return;
+  const take = takeUnderPlayhead(track);
+  if (!take) return setStatus("Move the playhead over a take to split it.", "error");
+  const result = await dispatch("take.split", { takeId: take.id, frame: Math.round(App.frame) });
+  if (result) setStatus(`Split ${track.name} at the playhead`);
+}
+
+function copyTakeAtPlayhead() {
+  const track = currentTrack();
+  if (!track) return;
+  const take = takeUnderPlayhead(track);
+  if (!take) return setStatus("Move the playhead over a take to copy it.", "error");
+  App.clipboard = { takeId: take.id };
+  setStatus(`Copied ${track.name} take — paste with Ctrl/Cmd+V`);
+}
+
+async function pasteTakeAtPlayhead() {
+  const track = currentTrack();
+  if (!track || App.recording) return;
+  const sourceId = App.clipboard?.takeId;
+  if (!sourceId) return setStatus("Copy a take first (Ctrl/Cmd+C).", "error");
+  if (!App.state.takes.some((take) => take.id === sourceId)) {
+    App.clipboard = null;
+    return setStatus("The copied take no longer exists.", "error");
+  }
+  const result = await dispatch("take.duplicate", {
+    takeId: sourceId,
+    trackId: track.id,
+    startFrame: Math.round(App.frame),
+  });
+  if (result) setStatus(`Pasted onto ${track.name} at the playhead`);
 }
 
 async function exportMix() {
@@ -1172,8 +1335,61 @@ function drawTimelineNow() {
     state: App.state,
     peaks: App.peaks,
     live,
+    lanes: timelineLanes(canvas),
     frame: App.frame,
+    zoom: App.zoom,
+    startFrame: App.viewStart,
+    follow: App.playing || App.recording,
     selectedTrackId: App.selectedTrackId,
+  });
+  if (canvas.layout) App.viewStart = canvas.layout.startFrame;
+}
+
+function zoomTo(next, anchorX) {
+  const canvas = document.getElementById("timeline");
+  const layout = canvas.layout;
+  if (!layout) return;
+  const zoom = Math.max(1, Math.min(128, next));
+  if (Math.abs(zoom - App.zoom) < 0.001) return;
+  const x = anchorX ?? layout.width / 2;
+  const anchorFrame = layout.startFrame + x / layout.pxPerFrame;
+  App.zoom = zoom;
+  App.viewStart = Math.max(0, anchorFrame - (x * layout.baseFrames) / (layout.width * zoom));
+  drawTimelineNow();
+  setStatus(`Zoom ${Math.round(zoom * 100)}%`);
+}
+
+function resetZoom() {
+  App.zoom = 1;
+  App.viewStart = 0;
+  drawTimelineNow();
+  setStatus("Zoom reset");
+}
+
+function zoomTimeline(event) {
+  if (!App.state) return;
+  const canvas = event.currentTarget;
+  const layout = canvas.layout;
+  if (!layout) return;
+  event.preventDefault();
+  if (event.ctrlKey || event.metaKey) {
+    const x = event.clientX - canvas.getBoundingClientRect().left;
+    zoomTo(App.zoom * Math.exp(-event.deltaY * 0.002), x);
+    return;
+  }
+  App.viewStart = Math.max(0, layout.startFrame + (event.deltaX + event.deltaY) / layout.pxPerFrame);
+  drawTimelineNow();
+}
+
+// timelineLanes mirrors the track cards' real geometry so each canvas lane
+// lines up with its row in the left panel, including while the list scrolls.
+function timelineLanes(canvas) {
+  const rows = document.querySelectorAll("#track-list .track");
+  if (!rows.length) return null;
+  const canvasBox = canvas.getBoundingClientRect();
+  return Array.from(rows, (row) => {
+    const box = row.getBoundingClientRect();
+    return { top: box.top - canvasBox.top, height: box.height };
   });
 }
 
@@ -1293,6 +1509,8 @@ async function openSession(root) {
     App.recording = false;
     App.pendingTake = null;
     App.selectedTrackId = null;
+    App.zoom = 1;
+    App.viewStart = 0;
     applyState(result.state);
     syncControls();
     document.getElementById("picker").hidden = true;
@@ -1319,6 +1537,8 @@ async function createSession(name, sampleRate) {
     App.recording = false;
     App.pendingTake = null;
     App.selectedTrackId = null;
+    App.zoom = 1;
+    App.viewStart = 0;
     applyState(result.state);
     syncControls();
     document.getElementById("picker").hidden = true;

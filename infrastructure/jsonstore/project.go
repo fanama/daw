@@ -8,9 +8,10 @@ import (
 	"gorecord/domain/session"
 )
 
-// SchemaVersion is the project file version this build writes. Version 2 stores
-// the five-band equalizer; version 1 projects are migrated when loaded.
-const SchemaVersion = 2
+// SchemaVersion is the project file version this build writes. Version 3 adds
+// layered take segments; version 2 stores the five-band equalizer; version 1
+// projects are migrated when loaded.
+const SchemaVersion = 3
 
 // ErrUnsupportedSchema is returned when a project was written by a newer app.
 var ErrUnsupportedSchema = errors.New("jsonstore: project schema is newer than this app")
@@ -75,6 +76,7 @@ type takeJSON struct {
 	Printed      bool      `json:"printed"`
 	Incomplete   bool      `json:"incomplete"`
 	Muted        bool      `json:"muted"`
+	Layered      bool      `json:"layered,omitempty"`
 	Trim         trimJSON  `json:"trim"`
 	GainDB       float64   `json:"gainDb"`
 	CreatedAt    time.Time `json:"createdAt"`
@@ -159,6 +161,7 @@ func takeFromState(take session.TakeState) takeJSON {
 		Printed:      take.Printed,
 		Incomplete:   take.Incomplete,
 		Muted:        take.Muted,
+		Layered:      take.Layered,
 		Trim:         trimJSON{StartFrame: take.Trim.StartFrame, EndFrame: take.Trim.EndFrame},
 		GainDB:       take.GainDB,
 		CreatedAt:    take.CreatedAt,
@@ -223,6 +226,7 @@ func takesToState(takes []takeJSON) []session.TakeState {
 			Printed:      take.Printed,
 			Incomplete:   take.Incomplete,
 			Muted:        take.Muted,
+			Layered:      take.Layered,
 			Trim:         session.Trim{StartFrame: take.Trim.StartFrame, EndFrame: take.Trim.EndFrame},
 			GainDB:       take.GainDB,
 			CreatedAt:    take.CreatedAt,

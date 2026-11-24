@@ -15,8 +15,10 @@ func (s *Session) AudibleTakes() []AudibleTake {
 			continue
 		}
 		for _, take := range s.takes {
-			isActive := take.id == track.activeTakeID
-			if !isActive || take.muted || take.AudibleLength() == 0 {
+			if take.trackID != track.id || take.muted || take.AudibleLength() == 0 {
+				continue
+			}
+			if take.id != track.activeTakeID && !take.layered {
 				continue
 			}
 			audible = append(audible, AudibleTake{Take: take})

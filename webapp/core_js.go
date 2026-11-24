@@ -135,6 +135,14 @@ func (c *core) applyTake(req request) error {
 		return c.service.SetTakeGain(takeID, req.GainDB)
 	case "take.trim":
 		return c.service.SetTakeTrim(takeID, session.Trim{StartFrame: req.StartFrame, EndFrame: req.EndFrame})
+	case "take.move":
+		return c.service.MoveTake(takeID, req.StartFrame)
+	case "take.split":
+		_, err := c.service.SplitTake(takeID, req.Frame)
+		return err
+	case "take.duplicate":
+		_, err := c.service.DuplicateTake(takeID, session.TrackID(req.TrackID), req.StartFrame)
+		return err
 	case "take.normalize":
 		_, err := c.service.NormalizeTake(takeID)
 		return err

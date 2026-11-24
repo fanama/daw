@@ -43,6 +43,25 @@
         </label>
       </div>
       <div class="actions">
+        <details id="shortcut-menu" class="output-menu shortcut-menu">
+          <summary title="Shortcuts and actions">Shortcuts</summary>
+          <div class="output-panel shortcut-panel">
+            <div class="shortcut-head"><strong>Actions</strong></div>
+            <button type="button" data-action="record"><span>Record / stop recording</span><kbd>R</kbd></button>
+            <button type="button" data-action="play"><span>Play / pause</span><kbd>Space</kbd></button>
+            <button type="button" data-action="stop"><span>Stop</span><kbd>■</kbd></button>
+            <button type="button" data-action="marker"><span>Add marker</span><kbd>M</kbd></button>
+            <button type="button" data-action="split"><span>Split take at playhead</span><kbd>S</kbd></button>
+            <button type="button" data-action="copy"><span>Copy take</span><kbd>Ctrl/Cmd+C</kbd></button>
+            <button type="button" data-action="paste"><span>Paste at playhead</span><kbd>Ctrl/Cmd+V</kbd></button>
+            <button type="button" data-action="export"><span>Export WAV</span><kbd>—</kbd></button>
+            <div class="shortcut-head"><strong>View</strong></div>
+            <button type="button" data-action="zoomIn"><span>Zoom in</span><kbd>+</kbd></button>
+            <button type="button" data-action="zoomOut"><span>Zoom out</span><kbd>−</kbd></button>
+            <button type="button" data-action="resetZoom"><span>Reset zoom</span><kbd>0</kbd></button>
+            <p class="shortcut-note">Ctrl/Cmd+wheel zooms around the pointer, the wheel pans. Drag a clip in the canvas to move it. On a track card, <kbd>L</kbd> listens without arming.</p>
+          </div>
+        </details>
         <span id="tuner" class="tuner" title="Tuner">—</span>
         <button id="btn-marker" class="ghost" title="Add a marker at the playhead (M)">Marker</button>
         <button id="btn-export" class="ghost">Export WAV</button>
@@ -60,11 +79,11 @@
           </span>
         </div>
         <div id="track-list" class="track-list"></div>
-        <p class="hint">Arm <b>●</b> to record; press <b>L</b> to listen without arming. PC and input tracks can be recorded or monitored together.</p>
+        <p class="hint">Arm <b>●</b> to record; press <b>L</b> to listen without arming. PC and input tracks can be recorded or monitored together. <b>S</b> splits a take at the playhead; <b>Ctrl/Cmd+C</b> copies it and <b>Ctrl/Cmd+V</b> pastes it there.</p>
       </aside>
 
       <section class="timeline">
-        <canvas id="timeline"></canvas>
+        <canvas id="timeline" title="S split · Ctrl/Cmd+C copy · Ctrl/Cmd+V paste at the playhead"></canvas>
       </section>
 
       <aside id="inspector" class="inspector"></aside>

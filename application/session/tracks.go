@@ -139,6 +139,9 @@ func (s *Service) RemoveTrack(id session.TrackID) error {
 		return err
 	}
 	for _, take := range orphaned {
+		if s.current.TakeFileInUse(take.File()) {
+			continue
+		}
 		_ = s.takes.MoveToTrash(s.root, take.File())
 	}
 	return s.Save()

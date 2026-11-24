@@ -231,6 +231,9 @@ func (s *Service) DeleteTake(id session.TakeID) error {
 	if err != nil {
 		return err
 	}
+	if s.current.TakeFileInUse(removed.File()) {
+		return s.Save()
+	}
 	if err := s.takes.MoveToTrash(s.root, removed.File()); err != nil {
 		return err
 	}

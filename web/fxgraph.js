@@ -14,6 +14,8 @@ const PLOT_HEIGHT = BOTTOM - TOP;
 const SPECTRUM_POINTS = 180;
 const SPECTRUM_FLOOR = -72;
 const SPECTRUM_CEIL = 0;
+const SPECTRUM_FREQUENCIES = Array.from({ length: SPECTRUM_POINTS }, (_, index) =>
+  20 * Math.pow(1000, index / (SPECTRUM_POINTS - 1)));
 const VOICE_POINTS = 64;
 const VOICE_FLOOR = -60;
 const VOICE_CEIL = 0;
@@ -57,10 +59,10 @@ function frame(kind, label) {
       id: `${id}-spectrum`, x1: "0", y1: "0", x2: "0", y2: "1",
     });
     addNode(spectrumGradient, "stop", {
-      offset: "0", "stop-color": "#7aa7ff", "stop-opacity": "0.30",
+      offset: "0", "stop-color": "#7aa7ff", "stop-opacity": "0.12",
     });
     addNode(spectrumGradient, "stop", {
-      offset: "1", "stop-color": "#7aa7ff", "stop-opacity": "0.02",
+      offset: "1", "stop-color": "#7aa7ff", "stop-opacity": "0.01",
     });
     spectrumFill = `url(#${id}-spectrum)`;
   }
@@ -256,7 +258,7 @@ function eqGraph(settings, sampleRate) {
       let line = "";
       let area = `M${LEFT},${BOTTOM}`;
       for (let index = 0; index < SPECTRUM_POINTS; index++) {
-        const x = LEFT + (index / (SPECTRUM_POINTS - 1)) * PLOT_WIDTH;
+        const x = eqX(SPECTRUM_FREQUENCIES[index]);
         const y = TOP + ((SPECTRUM_CEIL - levels[index]) / (SPECTRUM_CEIL - SPECTRUM_FLOOR)) * PLOT_HEIGHT;
         line += `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
         area += `L${x.toFixed(1)},${y.toFixed(1)}`;

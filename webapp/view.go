@@ -65,6 +65,7 @@ type webTake struct {
 	Printed      bool    `json:"printed"`
 	Incomplete   bool    `json:"incomplete"`
 	Muted        bool    `json:"muted"`
+	Layered      bool    `json:"layered"`
 	Trim         webTrim `json:"trim"`
 	GainDB       float64 `json:"gainDb"`
 }
@@ -207,6 +208,7 @@ func newWebTake(take session.TakeState) webTake {
 		Printed:      take.Printed,
 		Incomplete:   take.Incomplete,
 		Muted:        take.Muted,
+		Layered:      take.Layered,
 		Trim:         webTrim{StartFrame: take.Trim.StartFrame, EndFrame: take.Trim.EndFrame},
 		GainDB:       take.GainDB,
 	}

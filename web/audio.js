@@ -653,7 +653,7 @@ export class AudioEngine {
       const trimStart = Math.max(0, take.trim.startFrame);
       const trimEnd = take.trim.endFrame > 0 ? take.trim.endFrame : take.lengthFrames;
       const length = trimEnd - trimStart;
-      const startAt = take.startFrame + trimStart;
+      const startAt = take.startFrame;
       if (length <= 0 || startAt + length <= fromFrame) continue;
       const skip = Math.max(0, fromFrame - startAt);
       const source = this.ctx.createBufferSource();

@@ -35,6 +35,7 @@ type TakeState struct {
 	Printed      bool
 	Incomplete   bool
 	Muted        bool
+	Layered      bool
 	Trim         Trim
 	GainDB       float64
 	CreatedAt    time.Time
