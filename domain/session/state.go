@@ -50,17 +50,29 @@ type MarkerState struct {
 	Name  string
 }
 
+// NoteState is the persistence- and transport-neutral shape of a note.
+type NoteState struct {
+	ID           NoteID
+	TrackID      TrackID
+	Pitch        int
+	StartFrame   int
+	LengthFrames int
+	Velocity     int
+}
+
 type State struct {
 	Name          string
 	CreatedAt     time.Time
 	SampleRate    int
 	Tracks        []TrackState
 	Takes         []TakeState
+	Notes         []NoteState
 	Markers       []MarkerState
 	Click         mix.Click
 	LatencyOffset int
 	NextTrack     int
 	NextTake      int
+	NextNote      int
 	NextMarker    int
 }
 
@@ -74,6 +86,10 @@ func (s *Session) State() State {
 	for _, take := range s.takes {
 		takes = append(takes, take.state())
 	}
+	notes := make([]NoteState, 0, len(s.notes))
+	for _, note := range s.notes {
+		notes = append(notes, note.state())
+	}
 	markers := make([]MarkerState, 0, len(s.markers))
 	for _, marker := range s.markers {
 		markers = append(markers, marker.state())
@@ -84,11 +100,13 @@ func (s *Session) State() State {
 		SampleRate:    s.sampleRate,
 		Tracks:        tracks,
 		Takes:         takes,
+		Notes:         notes,
 		Markers:       markers,
 		Click:         s.click,
 		LatencyOffset: s.latencyOffset,
 		NextTrack:     s.nextTrack,
 		NextTake:      s.nextTake,
+		NextNote:      s.nextNote,
 		NextMarker:    s.nextMarker,
 	}
 }

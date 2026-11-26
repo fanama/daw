@@ -9,6 +9,15 @@ type TakeID string
 // MarkerID identifies a timeline marker inside one session.
 type MarkerID string
 
+// NoteID identifies a note inside one session.
+type NoteID string
+
+// String renders the identifier for display and logging.
+func (id NoteID) String() string { return string(id) }
+
+// IsZero reports whether the identifier is unset.
+func (id NoteID) IsZero() bool { return id == "" }
+
 // String renders the identifier for display and logging.
 func (id TrackID) String() string { return string(id) }
 

@@ -37,6 +37,12 @@ packaging/macos/   Info.plist for the double-clickable app bundle
   selected device is captured together, and each track receives its own take.
 - Layer takes on a sample-accurate timeline; previous takes play back while you
   record, and each take stores its start frame.
+- Instrument tracks: add a piano, bass, guitar or drums track, draw notes in
+  its piano roll (or fill steps in the drum sequencer), and hear them through
+  built-in Web Audio voices. Notes snap to the click tempo, can be dragged or
+  right-clicked away, follow the track's volume, pan and effect chain, and are
+  included in the WAV export. Instrument tracks are not armed or recorded from
+  an input.
 - Per-track effect chain for input and PC audio tracks: drive + tone stack →
   cabinet filter → five-band EQ → compressor → reverb. The equalizer has bands
   at 20 Hz, 100 Hz, 1 kHz, 6 kHz and 20 kHz. The chain is heard on live
@@ -194,6 +200,23 @@ Create a session, arm the guitar track and press record. The app asks for
 microphone access once. Add a second input track and arm both to capture two
 interface channels in one pass.
 
+Choose **Piano**, **Bass**, **Guitar** or **Drums** in the track panel and click
+**MIDI**. The new track opens on its piano roll, which adds notes on the click
+grid: drag
+a note to move it, drag its right edge to make it longer or shorter, scroll the
+roll with the wheel (Shift+wheel changes octave), right-click to delete a note,
+click a key to hear it, and use
+**scroll** or **8ve** to reach another part of the timeline. Notes use the
+track's volume, pan and effects, play with the transport, and are included in
+**Export WAV**.
+
+A **Drums** track opens on a step sequencer instead: one row per kit piece
+(kick, snare, clap, hats, toms, cymbals), sixteen sixteenth-note steps per bar.
+Click or drag across steps to fill a beat, click a filled step again to erase
+it, right-click to erase while drawing, and click a drum name to hear it. The
+bar slider or the wheel changes the bar; **sound** turns the same track into a
+piano, bass or guitar and back.
+
 Press **L** on a track to listen to it without arming it. You can listen to a
 microphone and PC audio at the same time, which is useful for playing or
 recording over a backing track.
@@ -245,7 +268,9 @@ audible mix; mute, solo, active takes, take gain, track effects and trim are
 - PC audio still comes from a separate clock. The clock probe corrects the
   measured rate, but browser dropouts or a paused shared tab can still create a
   discontinuity that no resampling can reconstruct.
-- No comping, MIDI, plugin hosting or time-stretch.
+- No comping, MIDI file import/export, plugin hosting or time-stretch.
+  Instrument tracks are edited in the app's piano roll; their notes are not
+  shared with other DAWs.
 - Reverb and amp are musically simple by design (no IR cabinet, no neural
   models). The reverb is algorithmic, not a sampled room.
 - The Freebuff deployment is a static site: no server-side project storage,

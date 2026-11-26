@@ -161,7 +161,7 @@ button.record::before { content: "●"; }
 .settings .volume { gap: 7px; }
 .settings .volume input[type="range"] { width: 78px; }
 .settings .vol-value { font-size: 11px; min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
-.switch { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.switch { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; white-space: nowrap; }
 
 .output-menu { position: relative; }
 .output-menu > summary {
@@ -276,7 +276,32 @@ button.record::before { content: "●"; }
   gap: 10px;
 }
 
-button.ghost { background: transparent; }
+button.ghost { background: transparent; white-space: nowrap; }
+
+/* The topbar must fit a chromeless window at any width: labels stay on one
+   line, and the Marker / Export buttons (both already in the Shortcuts menu)
+   fold away before anything gets clipped. */
+@media (max-width: 1560px) {
+  .topbar { gap: 10px; }
+  .actions { gap: 8px; }
+  #btn-marker,
+  #btn-export { display: none; }
+  .settings .volume input[type="range"] { width: 64px; }
+}
+
+@media (max-width: 1300px) {
+  .settings { gap: 8px; }
+  #output-label { max-width: 88px; }
+}
+
+@media (max-width: 1200px) {
+  .tuner,
+  .settings .vol-value,
+  .session-name { display: none; }
+  .settings .bpm { width: 50px; }
+  .settings .volume input[type="range"] { width: 56px; }
+  .timecode { min-width: 92px; font-size: 16px; }
+}
 .tuner {
   font-variant-numeric: tabular-nums;
   color: var(--accent);
@@ -288,7 +313,7 @@ button.ghost { background: transparent; }
 
 .workspace {
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr) 330px;
+  grid-template-columns: var(--tracks-width, 250px) 7px minmax(0, 1fr) 330px;
   min-height: 0;
 }
 
@@ -298,8 +323,32 @@ button.ghost { background: transparent; }
   overflow-y: auto;
 }
 
-.tracks { border-right: 1px solid var(--line); }
 .inspector { border-left: 1px solid var(--line); padding: 12px 14px 24px; }
+
+.resizer {
+  position: relative;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 30px;
+  border-radius: 2px;
+  background: var(--line);
+  transform: translate(-50%, -50%);
+}
+
+.resizer:hover::after,
+.resizer:focus-visible::after,
+.resizer.dragging::after { background: var(--accent); }
+.resizer:focus-visible { outline: none; }
 
 .panel-head {
   display: flex;
@@ -324,6 +373,88 @@ button.mini {
   border-radius: 7px;
   font-size: 16px;
   line-height: 1;
+}
+
+button.mini.wide { width: 40px; font-size: 9px; letter-spacing: 0.04em; }
+
+.instrument-kind {
+  width: auto;
+  padding: 3px 4px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+.notes { margin-top: 18px; }
+
+.drum-roll {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0f141c;
+}
+
+.notes-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.notes-head h3 { margin: 0; }
+
+.notes-count { font-size: 11px; color: var(--muted); }
+
+.notes-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.notes-toolbar select,
+.notes-toolbar button {
+  font-size: 11px;
+  padding: 3px 5px;
+  white-space: nowrap;
+}
+
+.notes-toolbar .unit { font-size: 11px; }
+
+.notes-scroll {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.notes-scroll input { flex: 1 1 auto; min-width: 60px; }
+
+.notes-scroll-value {
+  flex: none;
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.piano-roll {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.notes-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
 }
 
 .track-list { padding: 0 8px; display: flex; flex-direction: column; gap: 6px; }
@@ -716,7 +847,7 @@ details[open] > .section-toggle::after { content: "▾"; }
 .card-links a:hover { color: var(--accent); }
 
 @media (max-width: 980px) {
-  .workspace { grid-template-columns: 210px minmax(0, 1fr); }
+  .workspace { grid-template-columns: var(--tracks-width, 210px) 7px minmax(0, 1fr); }
   .inspector { display: none; }
   .settings .unit { display: none; }
   .settings .vol-value { display: none; }
@@ -727,5 +858,6 @@ details[open] > .section-toggle::after { content: "▾"; }
   .brand .session-name { display: none; }
   .actions .tuner { display: none; }
   .workspace { grid-template-columns: 1fr; grid-template-rows: 180px minmax(0, 1fr); }
-  .tracks { border-right: 0; border-bottom: 1px solid var(--line); }
+  .tracks { border-bottom: 1px solid var(--line); }
+  .resizer { display: none; }
 }

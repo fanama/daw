@@ -100,6 +100,23 @@ func (s *Session) SetPan(id TrackID, pan float64) error {
 	return nil
 }
 
+// SetInstrument changes the built-in sound of an instrument track.
+func (s *Session) SetInstrument(id TrackID, instrument Instrument) error {
+	index, err := s.trackIndex(id)
+	if err != nil {
+		return err
+	}
+	if !s.tracks[index].source.IsInstrument() {
+		return invalid("track %q is not an instrument track", s.tracks[index].name)
+	}
+	normalized, err := instrument.normalized()
+	if err != nil {
+		return err
+	}
+	s.tracks[index].source.Instrument = normalized
+	return nil
+}
+
 // SetSource changes where a track records from.
 func (s *Session) SetSource(id TrackID, source Source) error {
 	index, err := s.trackIndex(id)
@@ -109,6 +126,9 @@ func (s *Session) SetSource(id TrackID, source Source) error {
 	normalized, err := source.normalized()
 	if err != nil {
 		return err
+	}
+	if s.tracks[index].source.IsInstrument() || normalized.IsInstrument() {
+		return invalid("instrument tracks keep their instrument source")
 	}
 	previous := s.tracks[index].source
 	s.tracks[index].source = normalized
@@ -234,11 +254,21 @@ func (s *Session) RemoveTrack(id TrackID) ([]Take, error) {
 		kept = append(kept, take)
 	}
 	s.takes = kept
+	keptNotes := make([]Note, 0, len(s.notes))
+	for _, note := range s.notes {
+		if note.trackID != id {
+			keptNotes = append(keptNotes, note)
+		}
+	}
+	s.notes = keptNotes
 	return orphaned, nil
 }
 
 func (s *Session) ensureArmable(index int) error {
 	candidate := s.tracks[index]
+	if candidate.source.IsInstrument() {
+		return invalid("instrument tracks are not recorded")
+	}
 	for other := range s.tracks {
 		if other == index || !s.tracks[other].armed {
 			continue

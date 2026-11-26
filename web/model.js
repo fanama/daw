@@ -21,12 +21,34 @@ export function audibleTakes(state) {
   return selection;
 }
 
+// audibleNoteTracks lists instrument tracks that should sound, paired with
+// their notes. Instrument tracks play notes instead of recorded takes.
+export function audibleNoteTracks(state) {
+  const selection = [];
+  const notes = Array.isArray(state.notes) ? state.notes : [];
+  for (const track of state.tracks) {
+    if (track.source !== "instrument") continue;
+    if (track.muted || (state.anySolo && !track.soloed)) continue;
+    const trackNotes = notes.filter((note) => note.trackId === track.id);
+    if (trackNotes.length) selection.push({ track, notes: trackNotes });
+  }
+  return selection;
+}
+
+export function notesEndFrame(state) {
+  let end = 0;
+  for (const note of Array.isArray(state.notes) ? state.notes : []) {
+    end = Math.max(end, note.startFrame + note.lengthFrames);
+  }
+  return end;
+}
+
 export function contentEndFrame(state, extraFrame = 0) {
   let end = extraFrame;
   for (const take of state.takes) {
     end = Math.max(end, take.startFrame + takeLength(take));
   }
-  return end;
+  return Math.max(end, notesEndFrame(state));
 }
 
 export function formatDuration(seconds) {

@@ -2,8 +2,9 @@
 // same Web Audio graph; take audio is handed back to the Go core for persistence.
 
 import { buildEffectsChain } from "./effects.js";
+import { scheduleInstrumentNote } from "./instruments.js";
 import { detectPitch, noteReading } from "./tuner.js";
-import { audibleTakes, takeLength } from "./model.js";
+import { audibleNoteTracks, audibleTakes, notesEndFrame, takeLength } from "./model.js";
 import { estimateClockRatio } from "./clock.js";
 
 const BLOCK_FRAMES = 128;
@@ -562,11 +563,17 @@ export class AudioEngine {
 
   meter(trackId) {
     const chain = this.chains.get(trackId);
-    if (!chain) return 0;
-    chain.analyser.getFloatTimeDomainData(chain.meterBuffer);
+    if (chain) return this.readPeak(chain.analyser, chain.meterBuffer);
+    const playback = this.playbackAnalysers.get(trackId);
+    if (playback && this.playing) return this.readPeak(playback.analyser, playback.buffer);
+    return 0;
+  }
+
+  readPeak(analyser, buffer) {
+    analyser.getFloatTimeDomainData(buffer);
     let peak = 0;
-    for (let index = 0; index < chain.meterBuffer.length; index++) {
-      const value = Math.abs(chain.meterBuffer[index]);
+    for (let index = 0; index < buffer.length; index++) {
+      const value = Math.abs(buffer[index]);
       if (value > peak) peak = value;
     }
     return peak;
@@ -635,11 +642,48 @@ export class AudioEngine {
     this.anchorFrame = Math.max(0, Math.round(fromFrame));
     this.playing = true;
     this.schedulePlayback(state, pcm, this.anchorFrame, when);
+    this.scheduleNotes(state, this.anchorFrame, when);
     this.startClick();
     if (options.record) {
       this.startCapture(options.slots || [], when);
     }
     return when;
+  }
+
+  // Instrument tracks share the transport anchor with takes, so notes line up
+  // when playback starts in the middle of a part.
+  scheduleNotes(state, fromFrame, when) {
+    const rate = this.ctx.sampleRate;
+    for (const { track, notes } of audibleNoteTracks(state)) {
+      this.playbackChain(track);
+      const volume = this.trackVolume(track);
+      const tap = this.playbackAnalyser(track);
+      for (const note of notes) {
+        const end = note.startFrame + note.lengthFrames;
+        if (end <= fromFrame) continue;
+        const startAt = Math.max(note.startFrame, fromFrame);
+        scheduleInstrumentNote(
+          this.ctx,
+          volume,
+          track.instrument,
+          note.pitch,
+          when + (startAt - fromFrame) / rate,
+          (end - startAt) / rate,
+          note.velocity,
+          this.sources,
+          tap,
+        );
+      }
+    }
+  }
+
+  // auditionNote previews one note through the track's chain when the user
+  // clicks a key or places a note.
+  auditionNote(track, pitch, duration = 0.9) {
+    if (!this.ctx || !track) return;
+    this.playbackChain(track);
+    const volume = this.trackVolume(track);
+    scheduleInstrumentNote(this.ctx, volume, track.instrument, pitch, this.ctx.currentTime + 0.01, duration, 100, this.sources);
   }
 
   schedulePlayback(state, pcm, fromFrame, when) {
@@ -944,30 +988,36 @@ export class AudioEngine {
 // it is a monitor setting rather than part of the mix.
 export async function renderMixdown(state, pcm) {
   const selection = audibleTakes(state);
-  if (!selection.length) throw new Error("Nothing to export: select an audible take first.");
+  const instruments = audibleNoteTracks(state);
+  if (!selection.length && !instruments.length) {
+    throw new Error("Nothing to export: select an audible take or add notes first.");
+  }
   const rate = state.sampleRate || 48000;
-  let frames = 0;
+  let frames = notesEndFrame(state);
   for (const { take } of selection) {
     if (!pcm.get(take.file)) throw new Error(`Missing audio for ${take.file}.`);
     frames = Math.max(frames, take.startFrame + takeLength(take));
   }
-  if (frames <= 0) throw new Error("Nothing to export: the selected takes are empty.");
+  if (frames <= 0) throw new Error("Nothing to export: the selected takes and notes are empty.");
   const context = new OfflineAudioContext(2, frames, rate);
   const chains = new Map();
-  for (const { track, take } of selection) {
+  const chainFor = (track) => {
     let chain = chains.get(track.id);
-    if (!chain) {
-      const built = buildEffectsChain(context, track.effects);
-      const volume = context.createGain();
-      volume.gain.value = trackLevel(track);
-      const panner = context.createStereoPanner();
-      panner.pan.value = trackPan(track);
-      volume.connect(built.input);
-      built.output.connect(panner);
-      panner.connect(context.destination);
-      chain = { input: volume };
-      chains.set(track.id, chain);
-    }
+    if (chain) return chain;
+    const built = buildEffectsChain(context, track.effects);
+    const volume = context.createGain();
+    volume.gain.value = trackLevel(track);
+    const panner = context.createStereoPanner();
+    panner.pan.value = trackPan(track);
+    volume.connect(built.input);
+    built.output.connect(panner);
+    panner.connect(context.destination);
+    chain = { input: volume };
+    chains.set(track.id, chain);
+    return chain;
+  };
+  for (const { track, take } of selection) {
+    const chain = chainFor(track);
     const buffer = bufferFromAudio(context, pcm.get(take.file));
     const trimStart = Math.max(0, take.trim.startFrame);
     const trimEnd = take.trim.endFrame > 0 ? take.trim.endFrame : take.lengthFrames;
@@ -982,6 +1032,20 @@ export async function renderMixdown(state, pcm) {
     source.connect(gain);
     gain.connect(chain.input);
     source.start(take.startFrame / rate, offset, duration);
+  }
+  for (const { track, notes } of instruments) {
+    const chain = chainFor(track);
+    for (const note of notes) {
+      scheduleInstrumentNote(
+        context,
+        chain.input,
+        track.instrument,
+        note.pitch,
+        note.startFrame / rate,
+        note.lengthFrames / rate,
+        note.velocity,
+      );
+    }
   }
   return context.startRendering();
 }

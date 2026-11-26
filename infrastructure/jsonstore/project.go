@@ -8,11 +8,12 @@ import (
 	"fanamix/domain/session"
 )
 
-// SchemaVersion is the project file version this build writes. Version 5 stores
-// effect chains as ordered lists; version 4 lets PC audio tracks carry their own
-// effects; version 3 adds layered take segments; version 2 stores the five-band
-// equalizer; version 1 projects are migrated when loaded.
-const SchemaVersion = 5
+// SchemaVersion is the project file version this build writes. Version 6 adds
+// notes for instrument tracks; version 5 stores effect chains as ordered
+// lists; version 4 lets PC audio tracks carry their own effects; version 3 adds
+// layered take segments; version 2 stores the five-band equalizer; version 1
+// projects are migrated when loaded.
+const SchemaVersion = 6
 
 // ErrUnsupportedSchema is returned when a project was written by a newer app.
 var ErrUnsupportedSchema = errors.New("jsonstore: project schema is newer than this app")
@@ -37,12 +38,14 @@ type sessionJSON struct {
 	RecordLatencyOffset int       `json:"recordLatencyOffset"`
 	NextTrack           int       `json:"nextTrack"`
 	NextTake            int       `json:"nextTake"`
+	NextNote            int       `json:"nextNote"`
 	NextMarker          int       `json:"nextMarker"`
 }
 
 type sourceJSON struct {
-	Kind    string `json:"kind"`
-	Channel int    `json:"channel"`
+	Kind       string `json:"kind"`
+	Channel    int    `json:"channel"`
+	Instrument string `json:"instrument,omitempty"`
 }
 
 type trackJSON struct {
@@ -89,6 +92,7 @@ type projectJSON struct {
 	Session       sessionJSON  `json:"session"`
 	Tracks        []trackJSON  `json:"tracks"`
 	Takes         []takeJSON   `json:"takes"`
+	Notes         []noteJSON   `json:"notes"`
 	Markers       []markerJSON `json:"markers"`
 }
 
@@ -99,6 +103,7 @@ func projectFromState(state session.State) projectJSON {
 		Session:       sessionFromState(state),
 		Tracks:        tracksFromState(state.Tracks),
 		Takes:         takesFromState(state.Takes),
+		Notes:         notesFromState(state.Notes),
 		Markers:       markersFromState(state.Markers),
 	}
 }
@@ -112,6 +117,7 @@ func sessionFromState(state session.State) sessionJSON {
 		RecordLatencyOffset: state.LatencyOffset,
 		NextTrack:           state.NextTrack,
 		NextTake:            state.NextTake,
+		NextNote:            state.NextNote,
 		NextMarker:          state.NextMarker,
 	}
 }
@@ -129,7 +135,7 @@ func trackFromState(track session.TrackState) trackJSON {
 		ID:           track.ID.String(),
 		Name:         track.Name,
 		InputChannel: track.InputChannel,
-		Source:       sourceJSON{Kind: string(track.Source.Kind), Channel: track.Source.Channel},
+		Source:       sourceJSON{Kind: string(track.Source.Kind), Channel: track.Source.Channel, Instrument: string(track.Source.Instrument)},
 		Armed:        track.Armed,
 		Mute:         track.Muted,
 		Solo:         track.Soloed,
@@ -179,11 +185,13 @@ func stateFromProject(project projectJSON) (session.State, error) {
 		SampleRate:    project.Session.SampleRate,
 		Tracks:        tracksToState(project.Tracks),
 		Takes:         takesToState(project.Takes),
+		Notes:         notesToState(project.Notes),
 		Markers:       markersToState(project.Markers),
 		Click:         clickToDomain(project.Session.Click),
 		LatencyOffset: project.Session.RecordLatencyOffset,
 		NextTrack:     project.Session.NextTrack,
 		NextTake:      project.Session.NextTake,
+		NextNote:      project.Session.NextNote,
 		NextMarker:    project.Session.NextMarker,
 	}
 	if project.SchemaVersion < 4 {
@@ -203,7 +211,11 @@ func stateFromProject(project projectJSON) (session.State, error) {
 func tracksToState(tracks []trackJSON) []session.TrackState {
 	restored := make([]session.TrackState, 0, len(tracks))
 	for _, track := range tracks {
-		source := session.Source{Kind: session.SourceKind(track.Source.Kind), Channel: track.Source.Channel}
+		source := session.Source{
+			Kind:       session.SourceKind(track.Source.Kind),
+			Channel:    track.Source.Channel,
+			Instrument: session.Instrument(track.Source.Instrument),
+		}
 		if source.Kind == "" {
 			source = session.InputSource(track.InputChannel)
 		}

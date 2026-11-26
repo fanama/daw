@@ -3,29 +3,18 @@ package session
 // Restore rebuilds a session from persisted state while re-checking every
 // invariant, so a hand-edited or older project file cannot corrupt the model.
 func Restore(state State) (*Session, error) {
-	restored, err := New(state.Name, state.SampleRate, state.CreatedAt)
+	restored, err := baseFromState(state)
 	if err != nil {
 		return nil, err
 	}
-	restored.click = state.Click.Normalize()
-	restored.latencyOffset = state.LatencyOffset
-	restored.nextTrack = max(state.NextTrack, 1)
-	restored.nextTake = max(state.NextTake, 1)
-	restored.nextMarker = max(state.NextMarker, 1)
-
-	for _, trackState := range state.Tracks {
-		track, trackErr := trackFromState(trackState)
-		if trackErr != nil {
-			return nil, trackErr
-		}
-		restored.tracks = append(restored.tracks, track)
+	if err := restored.loadTracks(state.Tracks); err != nil {
+		return nil, err
 	}
-	for _, takeState := range state.Takes {
-		take, takeErr := takeFromState(takeState)
-		if takeErr != nil {
-			return nil, takeErr
-		}
-		restored.takes = append(restored.takes, take)
+	if err := restored.loadTakes(state.Takes); err != nil {
+		return nil, err
+	}
+	if err := restored.loadNotes(state.Notes); err != nil {
+		return nil, err
 	}
 	markers, err := markersFromState(state.Markers)
 	if err != nil {
@@ -36,6 +25,53 @@ func Restore(state State) (*Session, error) {
 		return nil, err
 	}
 	return restored, nil
+}
+
+func baseFromState(state State) (*Session, error) {
+	restored, err := New(state.Name, state.SampleRate, state.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	restored.click = state.Click.Normalize()
+	restored.latencyOffset = state.LatencyOffset
+	restored.nextTrack = max(state.NextTrack, 1)
+	restored.nextTake = max(state.NextTake, 1)
+	restored.nextNote = max(state.NextNote, 1)
+	restored.nextMarker = max(state.NextMarker, 1)
+	return restored, nil
+}
+
+func (s *Session) loadTracks(states []TrackState) error {
+	for _, trackState := range states {
+		track, err := trackFromState(trackState)
+		if err != nil {
+			return err
+		}
+		s.tracks = append(s.tracks, track)
+	}
+	return nil
+}
+
+func (s *Session) loadTakes(states []TakeState) error {
+	for _, takeState := range states {
+		take, err := takeFromState(takeState)
+		if err != nil {
+			return err
+		}
+		s.takes = append(s.takes, take)
+	}
+	return nil
+}
+
+func (s *Session) loadNotes(states []NoteState) error {
+	for _, noteState := range states {
+		note, err := noteFromState(noteState)
+		if err != nil {
+			return err
+		}
+		s.notes = append(s.notes, note)
+	}
+	return nil
 }
 
 func (s *Session) validate() error {
@@ -49,6 +85,13 @@ func (s *Session) validate() error {
 	if err := s.validateArming(); err != nil {
 		return err
 	}
+	if err := s.validateTakes(trackIDs); err != nil {
+		return err
+	}
+	return s.validateNotes(trackIDs)
+}
+
+func (s *Session) validateTakes(trackIDs map[TrackID]bool) error {
 	seenTakes := map[TakeID]bool{}
 	for _, take := range s.takes {
 		if seenTakes[take.id] {
@@ -70,12 +113,34 @@ func (s *Session) validate() error {
 	return nil
 }
 
+func (s *Session) validateNotes(trackIDs map[TrackID]bool) error {
+	seen := map[NoteID]bool{}
+	for _, note := range s.notes {
+		if seen[note.id] {
+			return conflict("note %s appears twice", note.id)
+		}
+		seen[note.id] = true
+		if !trackIDs[note.trackID] {
+			return invalid("note %s references unknown track %s", note.id, note.trackID)
+		}
+		for _, track := range s.tracks {
+			if track.id == note.trackID && !track.source.IsInstrument() {
+				return invalid("note %s belongs to %q, which is not an instrument track", note.id, track.name)
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Session) validateArming() error {
 	armedChannels := map[int]TrackID{}
 	systemArmed := TrackID("")
 	for _, track := range s.tracks {
 		if !track.armed {
 			continue
+		}
+		if track.source.IsInstrument() {
+			return invalid("instrument track %s cannot be armed", track.id)
 		}
 		if track.source.IsSystem() {
 			if !systemArmed.IsZero() {

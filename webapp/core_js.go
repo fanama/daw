@@ -87,6 +87,8 @@ func (c *core) applyCommand(req request) error {
 	switch {
 	case strings.HasPrefix(req.Op, "track."):
 		return c.applyTrack(req)
+	case strings.HasPrefix(req.Op, "note."):
+		return c.applyNote(req)
 	case strings.HasPrefix(req.Op, "take."):
 		return c.applyTake(req)
 	case strings.HasPrefix(req.Op, "marker."):
@@ -104,7 +106,7 @@ func (c *core) applyTrack(req request) error {
 	trackID := session.TrackID(req.TrackID)
 	switch req.Op {
 	case "track.add":
-		_, err := c.service.AddTrackWithSource(req.Name, trackSource(req.Source, req.Channel))
+		_, err := c.service.AddTrackWithSource(req.Name, trackSource(req))
 		return err
 	case "track.rename":
 		return c.service.RenameTrack(trackID, req.Name)
@@ -121,7 +123,9 @@ func (c *core) applyTrack(req request) error {
 	case "track.pan":
 		return c.service.SetTrackPan(trackID, req.Pan)
 	case "track.source":
-		return c.service.SetSource(trackID, trackSource(req.Source, req.Channel))
+		return c.service.SetSource(trackID, trackSource(req))
+	case "track.instrument":
+		return c.service.SetInstrument(trackID, session.Instrument(req.Instrument))
 	case "track.print":
 		return c.service.SetPrintEffects(trackID, req.Print)
 	case "track.effects":
@@ -209,11 +213,15 @@ func (c *core) exportMix() (int, error) {
 	return result.Frames, nil
 }
 
-func trackSource(kind string, channel int) session.Source {
-	if kind == "system" {
+func trackSource(req request) session.Source {
+	switch req.Source {
+	case "system":
 		return session.SystemSource()
+	case "instrument":
+		return session.InstrumentSource(session.Instrument(req.Instrument))
+	default:
+		return session.InputSource(req.Channel)
 	}
-	return session.InputSource(channel)
 }
 
 func newClick(req request) mix.Click {

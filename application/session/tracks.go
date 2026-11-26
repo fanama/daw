@@ -208,7 +208,7 @@ func (s *Service) Chains() []studio.ChainSettings {
 	tracks := s.current.Tracks()
 	chains := make([]studio.ChainSettings, 0, len(tracks))
 	for _, track := range tracks {
-		if track.IsSystemAudio() {
+		if track.IsSystemAudio() || track.IsInstrument() {
 			continue
 		}
 		chains = append(chains, studio.ChainSettings{

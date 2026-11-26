@@ -22,11 +22,13 @@ type Session struct {
 	sampleRate    int
 	tracks        []Track
 	takes         []Take
+	notes         []Note
 	markers       []Marker
 	click         mix.Click
 	latencyOffset int
 	nextTrack     int
 	nextTake      int
+	nextNote      int
 	nextMarker    int
 }
 
@@ -46,6 +48,7 @@ func New(name string, sampleRate int, now time.Time) (*Session, error) {
 		click:      mix.DefaultClick(),
 		nextTrack:  1,
 		nextTake:   1,
+		nextNote:   1,
 		nextMarker: 1,
 	}, nil
 }
@@ -91,6 +94,24 @@ func (s *Session) Takes() []Take {
 	takes := make([]Take, len(s.takes))
 	copy(takes, s.takes)
 	return takes
+}
+
+// Notes returns a copy of the note collection.
+func (s *Session) Notes() []Note {
+	notes := make([]Note, len(s.notes))
+	copy(notes, s.notes)
+	return notes
+}
+
+// TrackNotes returns the notes of one instrument track.
+func (s *Session) TrackNotes(id TrackID) []Note {
+	var notes []Note
+	for _, note := range s.notes {
+		if note.trackID == id {
+			notes = append(notes, note)
+		}
+	}
+	return notes
 }
 
 // Markers returns a copy of the marker collection.

@@ -4,7 +4,9 @@
 import * as storage from "./storage.js";
 import { AudioEngine, encodeWav, renderMixdown } from "./audio.js";
 import { clipAt, computePeaks, drawTimeline, frameAtX, markerAtX } from "./waveform.js";
-import { audibleTakes, formatDuration, takeLength } from "./model.js";
+import { audibleNoteTracks, audibleTakes, formatDuration, takeLength } from "./model.js";
+import { buildNoteEditor } from "./notes.js";
+import { buildDrumEditor } from "./drums.js";
 import { effectGraph } from "./fxgraph.js";
 import { effectsFromPreset, effectsToPreset } from "./effects-preset.js";
 import { FACTORY_PRESETS } from "./effects-factory-presets.js";
@@ -41,10 +43,14 @@ const App = {
   outputIds: [""],
   outputPreference: [""],
   outputRefreshToken: 0,
+  editor: { startBeat: 0, lowPitch: 48, lengthBeats: 1 },
 };
 
 const VOLUME_KEY = "fanamix.masterVolume";
 const OUTPUT_KEY = "fanamix.masterOutputs";
+const TRACKS_WIDTH_KEY = "fanamix.tracksWidth";
+const TRACKS_MIN_WIDTH = 180;
+const TRACKS_MAX_WIDTH = 520;
 
 // Keep a connection open for the launcher. Closing the window closes it and
 // lets the Go server stop; reloads reconnect within the shutdown grace period.
@@ -190,6 +196,7 @@ function bindControls() {
   document.getElementById("btn-sessions").addEventListener("click", showPicker);
   document.getElementById("btn-add-track").addEventListener("click", addInputTrack);
   document.getElementById("btn-add-pc").addEventListener("click", addSystemTrack);
+  document.getElementById("btn-add-instrument").addEventListener("click", addInstrumentTrack);
   document.getElementById("monitor-enabled").addEventListener("change", (event) => {
     App.engine?.setMonitor(event.target.checked);
     if (event.target.checked) openMonitoring();
@@ -203,6 +210,7 @@ function bindControls() {
     updateVolumeLabel();
     App.engine?.setMasterVolume(level);
   });
+  setupTracksResizer();
   App.outputPreference = readOutputPreference();
   refreshOutputs();
   document.getElementById("btn-output-rescan").addEventListener("click", () => refreshOutputs());
@@ -291,6 +299,67 @@ function bindControls() {
     if (key === "0") resetZoom();
   });
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+}
+
+function clampTracksWidth(width) {
+  const room = Math.max(TRACKS_MIN_WIDTH, Math.min(TRACKS_MAX_WIDTH, window.innerWidth - 430));
+  return Math.round(Math.max(TRACKS_MIN_WIDTH, Math.min(room, width)));
+}
+
+function applyTracksWidth(width) {
+  const value = clampTracksWidth(width);
+  document.documentElement.style.setProperty("--tracks-width", `${value}px`);
+  document.getElementById("tracks-resizer")?.setAttribute("aria-valuenow", String(value));
+  return value;
+}
+
+// The track panel keeps its width across sessions; the timeline canvas is
+// redrawn because the space it fills changes with the drag.
+function setupTracksResizer() {
+  const handle = document.getElementById("tracks-resizer");
+  if (!handle) return;
+  const stored = Number(window.localStorage.getItem(TRACKS_WIDTH_KEY));
+  let width = applyTracksWidth(stored > 0 ? stored : 250);
+  let active = null;
+  const remember = () => {
+    try {
+      window.localStorage.setItem(TRACKS_WIDTH_KEY, String(width));
+    } catch (error) {
+      // Private browsing can refuse local storage; keep the width in memory.
+    }
+  };
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("dragging");
+    active = { pointerId: event.pointerId, startX: event.clientX, startWidth: width };
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!active || active.pointerId !== event.pointerId) return;
+    width = applyTracksWidth(active.startWidth + event.clientX - active.startX);
+    drawTimelineNow();
+  });
+  const release = (event) => {
+    if (!active || active.pointerId !== event.pointerId) return;
+    active = null;
+    handle.classList.remove("dragging");
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+    remember();
+  };
+  handle.addEventListener("pointerup", release);
+  handle.addEventListener("pointercancel", release);
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    width = applyTracksWidth(width + (event.key === "ArrowRight" ? 10 : -10));
+    remember();
+    drawTimelineNow();
+  });
+  window.addEventListener("resize", () => {
+    width = applyTracksWidth(width);
+    drawTimelineNow();
+  });
 }
 
 function applyState(next) {
@@ -432,25 +501,31 @@ function trackRow(track) {
   name.value = track.name;
   name.title = "Track name";
   name.addEventListener("change", () => dispatch("track.rename", { trackId: track.id, name: name.value }));
-  top.append(name, element("span", "track-kind", track.source === "system" ? "PC" : `in ${track.channel + 1}`));
+  const isInstrument = track.source === "instrument";
+  const kindLabel = track.source === "system" ? "PC" : isInstrument ? track.instrument : `in ${track.channel + 1}`;
+  top.append(name, element("span", "track-kind", kindLabel));
   const controls = element("div", "track-controls");
+  if (!isInstrument) {
+    controls.append(
+      toggleButton("listen", "L", App.monitored.has(track.id), App.monitored.has(track.id) ? "Stop listening to this track" : "Listen without arming", () => {
+        const listening = !App.monitored.has(track.id);
+        if (listening) App.monitored.add(track.id);
+        else App.monitored.delete(track.id);
+        renderTracks();
+        App.engine?.syncMonitoring(App.state, App.monitored);
+        if (listening && document.getElementById("monitor-enabled").checked) openMonitoring();
+      }),
+      toggleButton("arm", "●", track.armed, "Arm this track", async () => {
+        const arming = !track.armed;
+        const result = await dispatch("track.arm", { trackId: track.id, armed: arming });
+        if (!result) return;
+        if (arming) App.monitored.add(track.id);
+        renderTracks();
+        if (!App.recording && document.getElementById("monitor-enabled").checked) openMonitoring();
+      }),
+    );
+  }
   controls.append(
-    toggleButton("listen", "L", App.monitored.has(track.id), App.monitored.has(track.id) ? "Stop listening to this track" : "Listen without arming", () => {
-      const listening = !App.monitored.has(track.id);
-      if (listening) App.monitored.add(track.id);
-      else App.monitored.delete(track.id);
-      renderTracks();
-      App.engine?.syncMonitoring(App.state, App.monitored);
-      if (listening && document.getElementById("monitor-enabled").checked) openMonitoring();
-    }),
-    toggleButton("arm", "●", track.armed, "Arm this track", async () => {
-      const arming = !track.armed;
-      const result = await dispatch("track.arm", { trackId: track.id, armed: arming });
-      if (!result) return;
-      if (arming) App.monitored.add(track.id);
-      renderTracks();
-      if (!App.recording && document.getElementById("monitor-enabled").checked) openMonitoring();
-    }),
     toggleButton("mute", "M", track.muted, "Mute", () => dispatch("track.mute", { trackId: track.id, muted: !track.muted })),
     toggleButton("solo", "S", track.soloed, "Solo", () => dispatch("track.solo", { trackId: track.id, soloed: !track.soloed })),
   );
@@ -462,7 +537,8 @@ function trackRow(track) {
   remove.title = "Delete this track";
   remove.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (window.confirm(`Delete "${track.name}" and its takes?`)) dispatch("track.remove", { trackId: track.id });
+    const what = isInstrument ? "notes" : "takes";
+    if (window.confirm(`Delete "${track.name}" and its ${what}?`)) dispatch("track.remove", { trackId: track.id });
   });
   controls.append(remove);
   const source = document.createElement("select");
@@ -480,7 +556,9 @@ function trackRow(track) {
     const result = await dispatch("track.source", { trackId: track.id, source: kind, channel: Number(channel || 0) });
     if (result && !App.recording && document.getElementById("monitor-enabled").checked) openMonitoring();
   });
-  row.append(top, controls, source, volumeControl(track), panControl(track));
+  row.append(top, controls);
+  if (!isInstrument) row.append(source);
+  row.append(volumeControl(track), panControl(track));
   App.meterNodes.set(track.id, bar);
   return row;
 }
@@ -572,18 +650,34 @@ function panControl(track) {
   return wrap;
 }
 
+// A new track goes to the end of the list, so select it: adding a MIDI track
+// should show its piano roll straight away.
+async function addTrack(params) {
+  const result = await dispatch("track.add", params);
+  const tracks = result?.state?.tracks || [];
+  if (tracks.length) selectTrack(tracks[tracks.length - 1].id);
+}
+
 function addInputTrack() {
   const name = window.prompt("Track name", "Guitar");
   if (!name) return;
   const used = new Set(App.state.tracks.filter((track) => track.source === "input").map((track) => track.channel));
   const channel = used.has(0) ? 1 : 0;
-  dispatch("track.add", { name, source: "input", channel });
+  addTrack({ name, source: "input", channel });
 }
 
 function addSystemTrack() {
   const name = window.prompt("Track name", "PC audio");
   if (!name) return;
-  dispatch("track.add", { name, source: "system", channel: 0 });
+  addTrack({ name, source: "system", channel: 0 });
+}
+
+function addInstrumentTrack() {
+  const instrument = document.getElementById("instrument-kind")?.value || "piano";
+  const labels = { piano: "Piano", bass: "Bass", guitar: "Guitar", drums: "Drums" };
+  const name = window.prompt("Track name", labels[instrument] || "Piano");
+  if (!name) return;
+  addTrack({ name, source: "instrument", instrument });
 }
 
 function renderInspector() {
@@ -599,8 +693,48 @@ function renderInspector() {
     return;
   }
   panel.append(element("h2", "", track.name));
-  panel.append(takesSection(track));
+  panel.append(track.source === "instrument" ? noteSection(track) : takesSection(track));
   panel.append(effectsSection(track));
+}
+
+function noteSection(track) {
+  const notes = (App.state.notes || []).filter((note) => note.trackId === track.id);
+  const beatFrames = (App.state.sampleRate * 60) / Math.max(20, Number(App.state.click.BPM) || 120);
+  const endBeat = notes.reduce((end, note) => Math.max(end, (note.startFrame + note.lengthFrames) / beatFrames), 0);
+  const build = track.instrument === "drums" ? buildDrumEditor : buildNoteEditor;
+  return build({
+    track,
+    notes,
+    sampleRate: App.state.sampleRate,
+    bpm: App.state.click.BPM,
+    beatsPerBar: App.state.click.beatsPerBar,
+    endBeat,
+    view: App.editor,
+    onAdd: (pitch, startFrame, lengthFrames) => dispatch("note.add", {
+      trackId: track.id,
+      pitch,
+      startFrame,
+      lengthFrames,
+      velocity: 100,
+    }),
+    onRemove: (noteId) => dispatch("note.remove", { noteId }),
+    onMove: (noteId, pitch, startFrame) => dispatch("note.move", { noteId, pitch, startFrame }),
+    onResize: (noteId, lengthFrames) => dispatch("note.resize", { noteId, lengthFrames }),
+    onAudition: (pitch) => auditionInstrument(track, pitch),
+    onView: (next) => Object.assign(App.editor, next),
+    onInstrument: (instrument) => dispatch("track.instrument", { trackId: track.id, instrument }),
+  });
+}
+
+async function auditionInstrument(track, pitch) {
+  if (!App.state) return;
+  const engine = ensureEngine();
+  try {
+    await engine.ensureContext(App.state.sampleRate);
+    engine.auditionNote(track, pitch);
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
 }
 
 function takesSection(track) {
@@ -1277,7 +1411,9 @@ async function togglePlayback() {
   if (App.recording) return stopRecording();
   if (!App.state) return;
   if (App.playing) return stopTransport();
-  if (!audibleTakes(App.state).length) return setStatus("Record a take or select an audible one first.", "error");
+  if (!audibleTakes(App.state).length && !audibleNoteTracks(App.state).length) {
+    return setStatus("Record a take or add notes first.", "error");
+  }
   const engine = ensureEngine();
   try {
     await engine.start(App.state, App.pcm, Math.round(App.frame));
@@ -1465,7 +1601,9 @@ async function pasteTakeAtPlayhead() {
 async function exportMix() {
   if (!App.state) return;
   const selection = audibleTakes(App.state);
-  if (!selection.length) return setStatus("Nothing to export: select an audible take first.", "error");
+  if (!selection.length && !audibleNoteTracks(App.state).length) {
+    return setStatus("Nothing to export: record a take or add notes first.", "error");
+  }
   for (const { take } of selection) {
     if (!App.pcm.get(take.file)) return setStatus(`Missing audio for ${take.file}.`, "error");
   }

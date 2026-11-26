@@ -76,13 +76,22 @@
         <div class="panel-head">
           <h2>Tracks</h2>
           <span class="head-actions">
+            <select id="instrument-kind" class="instrument-kind" aria-label="Instrument for a new MIDI track">
+              <option value="piano">Piano</option>
+              <option value="bass">Bass</option>
+              <option value="guitar">Guitar</option>
+              <option value="drums">Drums</option>
+            </select>
+            <button id="btn-add-instrument" class="mini wide" title="Add a piano, bass, guitar or drums track">MIDI</button>
             <button id="btn-add-pc" class="mini" title="Add a PC audio track">PC</button>
             <button id="btn-add-track" class="mini" title="Add an input track">+</button>
           </span>
         </div>
         <div id="track-list" class="track-list"></div>
-        <p class="hint">Arm <b>●</b> to record; press <b>L</b> to listen without arming. PC and input tracks can be recorded or monitored together. Click a clip to select it; <b>Del</b> removes it, <b>Ctrl/Cmd+Z</b> undoes the last edit. <b>S</b> splits a take at the playhead; <b>Ctrl/Cmd+C</b> copies it and <b>Ctrl/Cmd+V</b> pastes it there.</p>
+        <p class="hint">Arm <b>●</b> to record; press <b>L</b> to listen without arming. PC and input tracks can be recorded or monitored together. Click a clip to select it; <b>Del</b> removes it, <b>Ctrl/Cmd+Z</b> undoes the last edit. <b>S</b> splits a take at the playhead; <b>Ctrl/Cmd+C</b> copies it and <b>Ctrl/Cmd+V</b> pastes it there. MIDI tracks play piano, bass or guitar notes drawn in the piano roll.</p>
       </aside>
+
+      <div id="tracks-resizer" class="resizer" role="separator" aria-orientation="vertical" aria-label="Resize the track panel" aria-valuemin="180" aria-valuemax="520" aria-valuenow="250" tabindex="0" title="Drag to resize the track panel"></div>
 
       <section class="timeline">
         <canvas id="timeline" title="Click a clip to select · Del delete · Ctrl/Cmd+Z undo · S split · Ctrl/Cmd+C/V copy and paste at the playhead"></canvas>

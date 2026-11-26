@@ -39,7 +39,7 @@ func NewTrackWithSource(id TrackID, name string, source Source) (Track, error) {
 		return Track{}, err
 	}
 	effects := mix.DefaultEffects()
-	if normalized.IsSystem() {
+	if normalized.IsSystem() || normalized.IsInstrument() {
 		effects = mix.DryEffects()
 	}
 	return Track{
@@ -62,9 +62,16 @@ func (t Track) Source() Source { return t.source }
 // IsSystemAudio reports whether the track records the computer's output.
 func (t Track) IsSystemAudio() bool { return t.source.IsSystem() }
 
-// InputChannel returns the interface channel, or -1 for a system audio track.
+// IsInstrument reports whether the track is played from notes instead of
+// recorded from an input.
+func (t Track) IsInstrument() bool { return t.source.IsInstrument() }
+
+// Instrument returns the built-in sound of an instrument track.
+func (t Track) Instrument() Instrument { return t.source.Instrument }
+
+// InputChannel returns the interface channel, or -1 for non-input tracks.
 func (t Track) InputChannel() int {
-	if t.source.IsSystem() {
+	if t.source.IsSystem() || t.source.IsInstrument() {
 		return -1
 	}
 	return t.source.Channel

@@ -19,6 +19,7 @@ type webState struct {
 	Click         webClick    `json:"click"`
 	Tracks        []webTrack  `json:"tracks"`
 	Takes         []webTake   `json:"takes"`
+	Notes         []webNote   `json:"notes"`
 	Markers       []webMarker `json:"markers"`
 }
 
@@ -37,12 +38,23 @@ type webMarker struct {
 	Name  string `json:"name"`
 }
 
+// webNote is one timed MIDI note in browser shape.
+type webNote struct {
+	ID           string `json:"id"`
+	TrackID      string `json:"trackId"`
+	Pitch        int    `json:"pitch"`
+	StartFrame   int    `json:"startFrame"`
+	LengthFrames int    `json:"lengthFrames"`
+	Velocity     int    `json:"velocity"`
+}
+
 // webTrack is one track in browser shape.
 type webTrack struct {
 	ID           string      `json:"id"`
 	Name         string      `json:"name"`
 	Source       string      `json:"source"`
 	Channel      int         `json:"channel"`
+	Instrument   string      `json:"instrument,omitempty"`
 	Armed        bool        `json:"armed"`
 	Muted        bool        `json:"muted"`
 	Soloed       bool        `json:"soloed"`
@@ -96,38 +108,43 @@ type webStart struct {
 // request is one command from the page. A flat shape keeps the bridge small;
 // each command reads only the fields it documents.
 type request struct {
-	Op          string       `json:"op"`
-	Name        string       `json:"name"`
-	SampleRate  int          `json:"sampleRate"`
-	Root        string       `json:"root"`
-	Project     string       `json:"project"`
-	TrackID     string       `json:"trackId"`
-	TakeID      string       `json:"takeId"`
-	MarkerID    string       `json:"markerId"`
-	Frame       int          `json:"frame"`
-	Source      string       `json:"source"`
-	Channel     int          `json:"channel"`
-	Armed       bool         `json:"armed"`
-	Muted       bool         `json:"muted"`
-	Soloed      bool         `json:"soloed"`
-	Print       bool         `json:"print"`
-	Enabled     bool         `json:"enabled"`
-	BPM         float64      `json:"bpm"`
-	BeatsPerBar int          `json:"beatsPerBar"`
-	CountInBars int          `json:"countInBars"`
-	Latency     int          `json:"latency"`
-	GainDB      float64      `json:"gainDb"`
-	VolumeDB    float64      `json:"volumeDb"`
-	Pan         float64      `json:"pan"`
-	StartFrame  int          `json:"startFrame"`
-	EndFrame    int          `json:"endFrame"`
-	Frames      int          `json:"frames"`
-	Incomplete  bool         `json:"incomplete"`
-	Kind        string       `json:"kind"`
-	Index       int          `json:"index"`
-	From        int          `json:"from"`
-	To          int          `json:"to"`
-	Effects     *mix.Effects `json:"effects"`
+	Op           string       `json:"op"`
+	Name         string       `json:"name"`
+	SampleRate   int          `json:"sampleRate"`
+	Root         string       `json:"root"`
+	Project      string       `json:"project"`
+	TrackID      string       `json:"trackId"`
+	TakeID       string       `json:"takeId"`
+	NoteID       string       `json:"noteId"`
+	MarkerID     string       `json:"markerId"`
+	Frame        int          `json:"frame"`
+	Source       string       `json:"source"`
+	Channel      int          `json:"channel"`
+	Instrument   string       `json:"instrument"`
+	Pitch        int          `json:"pitch"`
+	Velocity     int          `json:"velocity"`
+	LengthFrames int          `json:"lengthFrames"`
+	Armed        bool         `json:"armed"`
+	Muted        bool         `json:"muted"`
+	Soloed       bool         `json:"soloed"`
+	Print        bool         `json:"print"`
+	Enabled      bool         `json:"enabled"`
+	BPM          float64      `json:"bpm"`
+	BeatsPerBar  int          `json:"beatsPerBar"`
+	CountInBars  int          `json:"countInBars"`
+	Latency      int          `json:"latency"`
+	GainDB       float64      `json:"gainDb"`
+	VolumeDB     float64      `json:"volumeDb"`
+	Pan          float64      `json:"pan"`
+	StartFrame   int          `json:"startFrame"`
+	EndFrame     int          `json:"endFrame"`
+	Frames       int          `json:"frames"`
+	Incomplete   bool         `json:"incomplete"`
+	Kind         string       `json:"kind"`
+	Index        int          `json:"index"`
+	From         int          `json:"from"`
+	To           int          `json:"to"`
+	Effects      *mix.Effects `json:"effects"`
 }
 
 // response is the command result and the resulting session view.
@@ -152,6 +169,7 @@ func newWebState(root string, current *session.Session) *webState {
 		Click:         newWebClick(state.Click),
 		Tracks:        make([]webTrack, 0, len(state.Tracks)),
 		Takes:         make([]webTake, 0, len(state.Takes)),
+		Notes:         make([]webNote, 0, len(state.Notes)),
 		Markers:       make([]webMarker, 0, len(state.Markers)),
 	}
 	for _, track := range state.Tracks {
@@ -159,6 +177,9 @@ func newWebState(root string, current *session.Session) *webState {
 	}
 	for _, take := range state.Takes {
 		view.Takes = append(view.Takes, newWebTake(take))
+	}
+	for _, note := range state.Notes {
+		view.Notes = append(view.Notes, newWebNote(note))
 	}
 	for _, marker := range state.Markers {
 		view.Markers = append(view.Markers, webMarker{
@@ -184,11 +205,15 @@ func newWebTrack(track session.TrackState) webTrack {
 	if track.Source.IsSystem() {
 		source = "system"
 	}
+	if track.Source.IsInstrument() {
+		source = "instrument"
+	}
 	return webTrack{
 		ID:           track.ID.String(),
 		Name:         track.Name,
 		Source:       source,
 		Channel:      track.InputChannel,
+		Instrument:   string(track.Source.Instrument),
 		Armed:        track.Armed,
 		Muted:        track.Muted,
 		Soloed:       track.Soloed,
@@ -197,6 +222,17 @@ func newWebTrack(track session.TrackState) webTrack {
 		PrintEffects: track.PrintEffects,
 		ActiveTakeID: track.ActiveTakeID.String(),
 		Effects:      track.Effects,
+	}
+}
+
+func newWebNote(note session.NoteState) webNote {
+	return webNote{
+		ID:           note.ID.String(),
+		TrackID:      note.TrackID.String(),
+		Pitch:        note.Pitch,
+		StartFrame:   note.StartFrame,
+		LengthFrames: note.LengthFrames,
+		Velocity:     note.Velocity,
 	}
 }
 

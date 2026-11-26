@@ -124,6 +124,26 @@ function drawTake(context, take, track, y, laneHeight, layout, view) {
   context.restore();
 }
 
+const NOTE_LOW = 36;
+const NOTE_HIGH = 84;
+
+// Instrument lanes show their notes as a compact pitch map, so the timeline
+// previews the part without opening the piano roll.
+function drawNotes(context, notes, y, laneHeight, layout) {
+  const top = y + 16;
+  const area = Math.max(6, laneHeight - 22);
+  context.fillStyle = "#4fbf98";
+  for (const note of notes) {
+    const x = (note.startFrame - layout.startFrame) * layout.pxPerFrame;
+    const width = Math.max(2, note.lengthFrames * layout.pxPerFrame);
+    if (x + width < 0 || x > layout.width) continue;
+    const pitch = Math.max(NOTE_LOW, Math.min(NOTE_HIGH, note.pitch));
+    const row = (pitch - NOTE_LOW) / (NOTE_HIGH - NOTE_LOW);
+    const noteY = top + (1 - row) * (area - 4);
+    context.fillRect(Math.max(0, x), noteY, width, 3);
+  }
+}
+
 function drawLive(context, live, y, laneHeight, layout) {
   if (!live || !live.peaks || live.peaks.length === 0) return;
   const x = (live.startFrame - layout.startFrame) * layout.pxPerFrame;
@@ -245,6 +265,10 @@ export function drawTimeline(canvas, view) {
     context.font = "11px sans-serif";
     context.textBaseline = "alphabetic";
     context.fillText(track.name, 10, y + 13);
+    if (track.source === "instrument") {
+      const notes = Array.isArray(state.notes) ? state.notes : [];
+      drawNotes(context, notes.filter((note) => note.trackId === track.id), y, laneHeight, layout);
+    }
     for (const take of state.takes) {
       if (take.trackId !== track.id) continue;
       const length = takeLength(take);
