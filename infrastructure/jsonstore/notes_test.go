@@ -20,6 +20,12 @@ func TestNotesRoundTripWithTheInstrumentSource(t *testing.T) {
 	if _, err := current.AddNote(track.ID(), 67, 960, 480, 88); err != nil {
 		t.Fatalf("add note: %v", err)
 	}
+	if err := current.SetRepeat(track.ID(), 3); err != nil {
+		t.Fatalf("loop the pattern: %v", err)
+	}
+	if err := current.SetPatternFrames(track.ID(), 1920); err != nil {
+		t.Fatalf("widen the pattern: %v", err)
+	}
 
 	encoded, err := jsonstore.EncodeState(current.State())
 	if err != nil {
@@ -32,6 +38,12 @@ func TestNotesRoundTripWithTheInstrumentSource(t *testing.T) {
 	tracks := restored.Tracks()
 	if len(tracks) != 1 || !tracks[0].IsInstrument() || tracks[0].Instrument() != session.InstrumentGuitar {
 		t.Fatalf("instrument source did not round-trip: %+v", tracks)
+	}
+	if tracks[0].Repeat() != 3 {
+		t.Fatalf("repeat count did not round-trip: %d", tracks[0].Repeat())
+	}
+	if tracks[0].PatternFrames() != 1920 {
+		t.Fatalf("pattern length did not round-trip: %d", tracks[0].PatternFrames())
 	}
 	notes := restored.Notes()
 	if len(notes) != 1 {

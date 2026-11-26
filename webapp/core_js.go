@@ -126,16 +126,14 @@ func (c *core) applyTrack(req request) error {
 		return c.service.SetSource(trackID, trackSource(req))
 	case "track.instrument":
 		return c.service.SetInstrument(trackID, session.Instrument(req.Instrument))
+	case "track.repeat":
+		return c.service.SetRepeat(trackID, req.Repeat)
+	case "track.pattern":
+		return c.service.SetPatternFrames(trackID, req.Frames)
 	case "track.print":
 		return c.service.SetPrintEffects(trackID, req.Print)
-	case "track.effects":
-		return c.setEffects(trackID, req.Effects)
-	case "track.effect.add":
-		return c.service.AddEffect(trackID, mix.EffectKind(req.Kind))
-	case "track.effect.remove":
-		return c.service.RemoveEffect(trackID, req.Index)
-	case "track.effect.move":
-		return c.service.MoveEffect(trackID, req.From, req.To)
+	case "track.effects", "track.effect.add", "track.effect.remove", "track.effect.move":
+		return c.applyTrackEffect(trackID, req)
 	default:
 		return fmt.Errorf("unknown track command %q", req.Op)
 	}

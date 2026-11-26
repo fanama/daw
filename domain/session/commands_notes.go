@@ -60,6 +60,26 @@ func (s *Session) ResizeNote(id NoteID, lengthFrames int) error {
 	return nil
 }
 
+// noteSpanFrames is the length from a track's first note to its last end.
+func (s *Session) noteSpanFrames(trackID TrackID) int {
+	start, end := -1, 0
+	for _, note := range s.notes {
+		if note.trackID != trackID {
+			continue
+		}
+		if start < 0 || note.startFrame < start {
+			start = note.startFrame
+		}
+		if note.EndFrame() > end {
+			end = note.EndFrame()
+		}
+	}
+	if start < 0 {
+		return 0
+	}
+	return end - start
+}
+
 func (s *Session) noteIndex(id NoteID) (int, error) {
 	for index := range s.notes {
 		if s.notes[index].id == id {

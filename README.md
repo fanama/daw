@@ -210,6 +210,17 @@ click a key to hear it, and use
 track's volume, pan and effects, play with the transport, and are included in
 **Export WAV**.
 
+In the timeline, instrument tracks stand out as darker green regions showing
+their notes. Drag the small square at the end of a MIDI region to repeat it:
+Logic-style dashed copies appear as you drag, the count shows as **×2**, **×3**,
+and the repetitions play and export with the session. Drag the handle back to
+remove copies; the piano roll still edits the original pattern only.
+
+The lower-right corner of the region widens the pattern itself: drag it right
+to include trailing silence, and the repetitions then start after that longer
+pattern. It cannot shrink below the notes; use the loop handle to change the
+number of copies.
+
 A **Drums** track opens on a step sequencer instead: one row per kit piece
 (kick, snare, clap, hats, toms, cymbals), sixteen sixteenth-note steps per bar.
 Click or drag across steps to fill a beat, click a filled step again to erase

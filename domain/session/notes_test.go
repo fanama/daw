@@ -63,6 +63,25 @@ func TestInstrumentTrackHoldsNotesAndCannotBeArmed(t *testing.T) {
 		t.Fatalf("an empty note must be refused, got %v", err)
 	}
 
+	if err := s.SetRepeat(track.ID(), 2); err != nil {
+		t.Fatalf("loop the pattern: %v", err)
+	}
+	if looped, ok := s.FindTrack(track.ID()); !ok || looped.Repeat() != 2 {
+		t.Fatalf("repeat count was not kept: %+v", looped)
+	}
+	if err := s.SetRepeat(track.ID(), session.MaxTrackRepeat+1); !session.IsCode(err, session.CodeInvalid) {
+		t.Fatalf("an oversized loop must be refused, got %v", err)
+	}
+	if err := s.SetPatternFrames(track.ID(), 24000); err != nil {
+		t.Fatalf("widen the pattern: %v", err)
+	}
+	if widened, ok := s.FindTrack(track.ID()); !ok || widened.PatternFrames() != 24000 {
+		t.Fatalf("pattern length was not kept: %+v", widened)
+	}
+	if err := s.SetPatternFrames(track.ID(), 1000); !session.IsCode(err, session.CodeInvalid) {
+		t.Fatalf("a pattern shorter than its notes must be refused, got %v", err)
+	}
+
 	if _, err := s.RemoveTrack(track.ID()); err != nil {
 		t.Fatalf("remove track: %v", err)
 	}
@@ -76,6 +95,12 @@ func TestNoteCommandsRejectAVoiceTrackAndBadPitch(t *testing.T) {
 	audio := addTrack(t, s, "Mic", 0)
 	if _, err := s.AddNote(audio.ID(), 60, 0, 120, 100); !session.IsCode(err, session.CodeInvalid) {
 		t.Fatalf("notes belong to instrument tracks only, got %v", err)
+	}
+	if err := s.SetRepeat(audio.ID(), 1); !session.IsCode(err, session.CodeInvalid) {
+		t.Fatalf("audio tracks cannot loop notes, got %v", err)
+	}
+	if err := s.SetPatternFrames(audio.ID(), 4800); !session.IsCode(err, session.CodeInvalid) {
+		t.Fatalf("audio tracks cannot widen a pattern, got %v", err)
 	}
 
 	keys, err := s.AddTrackWithSource("Keys", session.InstrumentSource(session.InstrumentGuitar))

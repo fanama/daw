@@ -2,7 +2,7 @@
 // per bar. Each step is an ordinary note, so playback, export and persistence
 // reuse the instrument-track path.
 
-import { DRUM_KIT } from "./instruments.js";
+import { DRUM_KIT } from "./drum-kit.js";
 
 const LABEL_WIDTH = 82;
 const RULER_HEIGHT = 20;

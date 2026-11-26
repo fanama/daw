@@ -1,6 +1,6 @@
 // Timeline rendering: peak envelopes per take, lane layout, ruler and playhead.
 
-import { contentEndFrame, takeLength } from "./model.js";
+import { contentEndFrame, noteSpan, patternLength, takeLength } from "./model.js";
 
 const RULER_HEIGHT = 22;
 const BUCKET_FRAMES = 256;
@@ -129,12 +129,12 @@ const NOTE_HIGH = 84;
 
 // Instrument lanes show their notes as a compact pitch map, so the timeline
 // previews the part without opening the piano roll.
-function drawNotes(context, notes, y, laneHeight, layout) {
+function drawNotes(context, notes, y, laneHeight, layout, offsetFrames = 0) {
   const top = y + 16;
   const area = Math.max(6, laneHeight - 22);
   context.fillStyle = "#4fbf98";
   for (const note of notes) {
-    const x = (note.startFrame - layout.startFrame) * layout.pxPerFrame;
+    const x = (note.startFrame + offsetFrames - layout.startFrame) * layout.pxPerFrame;
     const width = Math.max(2, note.lengthFrames * layout.pxPerFrame);
     if (x + width < 0 || x > layout.width) continue;
     const pitch = Math.max(NOTE_LOW, Math.min(NOTE_HIGH, note.pitch));
@@ -142,6 +142,75 @@ function drawNotes(context, notes, y, laneHeight, layout) {
     const noteY = top + (1 - row) * (area - 4);
     context.fillRect(Math.max(0, x), noteY, width, 3);
   }
+}
+
+const LOOP_HANDLE = 10;
+
+// An instrument lane reads as one MIDI region: a tinted block from the first
+// note to the last, one dashed copy per loop, and a square loop handle at the
+// end that is dragged to add or remove repetitions.
+function drawMidiRegion(context, track, notes, y, laneHeight, layout, view) {
+  const span = noteSpan(notes);
+  if (!span) return null;
+  const top = y + 14;
+  const height = Math.max(8, laneHeight - 20);
+  const x = (span.start - layout.startFrame) * layout.pxPerFrame;
+  const previewFrames = view.patternPreview && view.patternPreview.trackId === track.id ? view.patternPreview.frames : null;
+  const pattern = Math.max(span.length, previewFrames === null ? patternLength(notes, track.patternFrames) : previewFrames);
+  const width = Math.max(3, pattern * layout.pxPerFrame);
+  const preview = view.loopPreview && view.loopPreview.trackId === track.id ? view.loopPreview.repeats : null;
+  const repeats = Math.max(0, Math.min(32, preview === null ? Number(track.repeat) || 0 : preview));
+  const selected = track.id === view.selectedTrackId;
+  const total = width * (1 + repeats);
+  context.fillStyle = selected ? "#1c4b3e" : "#173c32";
+  context.fillRect(x, top, total, height);
+  context.strokeStyle = selected ? "#8be8c5" : "#3c8f74";
+  context.lineWidth = selected ? 1.5 : 1;
+  context.strokeRect(x + 0.5, top + 0.5, Math.max(1, total - 1), Math.max(1, height - 1));
+  context.strokeStyle = "#2f6f5b";
+  context.setLineDash([4, 3]);
+  for (let copy = 1; copy <= repeats; copy++) {
+    context.beginPath();
+    context.moveTo(x + copy * width + 0.5, top);
+    context.lineTo(x + copy * width + 0.5, top + height);
+    context.stroke();
+  }
+  context.setLineDash([]);
+  drawNotes(context, notes, y, laneHeight, layout);
+  for (let copy = 1; copy <= repeats; copy++) drawNotes(context, notes, y, laneHeight, layout, pattern * copy);
+  if (repeats) {
+    context.fillStyle = "#8be8c5";
+    context.font = "9px sans-serif";
+    context.textBaseline = "alphabetic";
+    context.fillText(`×${1 + repeats}`, x + 5, top + 10);
+  }
+  const handle = {
+    trackId: track.id,
+    x: x + total - LOOP_HANDLE,
+    y: top,
+    width: LOOP_HANDLE,
+    height: Math.min(12, height),
+    patternFrames: pattern,
+    repeats,
+  };
+  context.fillStyle = selected ? "#8be8c5" : "#5fae91";
+  context.fillRect(handle.x, handle.y, handle.width, handle.height);
+  const resize = {
+    trackId: track.id,
+    x: x + width - 10,
+    y: top + height - 10,
+    width: 10,
+    height: 10,
+    patternFrames: pattern,
+    minFrames: span.length,
+  };
+  context.beginPath();
+  context.moveTo(resize.x, resize.y + resize.height);
+  context.lineTo(resize.x + resize.width, resize.y + resize.height);
+  context.lineTo(resize.x + resize.width, resize.y);
+  context.closePath();
+  context.fill();
+  return { ...handle, resize };
 }
 
 function drawLive(context, live, y, laneHeight, layout) {
@@ -240,8 +309,10 @@ export function drawTimeline(canvas, view) {
     laneHeight: 0,
   };
   const hits = [];
+  const midiHandles = [];
   canvas.layout = layout;
   canvas.clipHits = hits;
+  canvas.midiHandles = midiHandles;
   canvas.markerHits = markers.map((marker) => ({
     ...marker,
     x: (marker.frame - startFrame) * layout.pxPerFrame,
@@ -259,15 +330,20 @@ export function drawTimeline(canvas, view) {
     const row = laneRows && laneRows[index];
     const y = row ? Math.round(row.top) : rulerHeight + index * layout.laneHeight;
     const laneHeight = row ? Math.max(1, Math.round(row.height)) : layout.laneHeight;
-    context.fillStyle = track.id === view.selectedTrackId ? "#151c27" : "#0f141c";
+    const midiLane = track.source === "instrument";
+    context.fillStyle = midiLane
+      ? (track.id === view.selectedTrackId ? "#16241f" : "#121b19")
+      : (track.id === view.selectedTrackId ? "#151c27" : "#0f141c");
     context.fillRect(0, y, width, Math.max(1, laneHeight - 1));
     context.fillStyle = "#66758b";
     context.font = "11px sans-serif";
     context.textBaseline = "alphabetic";
     context.fillText(track.name, 10, y + 13);
-    if (track.source === "instrument") {
+    if (midiLane) {
       const notes = Array.isArray(state.notes) ? state.notes : [];
-      drawNotes(context, notes.filter((note) => note.trackId === track.id), y, laneHeight, layout);
+      const trackNotes = notes.filter((note) => note.trackId === track.id);
+      const handle = drawMidiRegion(context, track, trackNotes, y, laneHeight, layout, view);
+      if (handle) midiHandles.push(handle);
     }
     for (const take of state.takes) {
       if (take.trackId !== track.id) continue;
@@ -312,6 +388,26 @@ export function clipAt(canvas, x, y) {
     const clip = hits[index];
     if (x < clip.x || x > clip.x + clip.width || y < clip.y || y > clip.y + clip.height) continue;
     return clip;
+  }
+  return null;
+}
+
+// midiLoopHandleAt returns the loop handle of a MIDI region under the pointer.
+export function midiLoopHandleAt(canvas, x, y) {
+  for (const handle of canvas.midiHandles || []) {
+    if (x < handle.x || x > handle.x + handle.width || y < handle.y || y > handle.y + handle.height) continue;
+    return handle;
+  }
+  return null;
+}
+
+// midiResizeHandleAt returns the pattern-resize handle under the pointer.
+export function midiResizeHandleAt(canvas, x, y) {
+  for (const handle of canvas.midiHandles || []) {
+    const box = handle.resize;
+    if (!box) continue;
+    if (x < box.x || x > box.x + box.width || y < box.y || y > box.y + box.height) continue;
+    return box;
   }
   return null;
 }

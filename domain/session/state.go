@@ -9,18 +9,20 @@ import (
 // TrackState is the persistence- and transport-neutral shape of a track.
 // Adapters map their own records to and from it.
 type TrackState struct {
-	ID           TrackID
-	Name         string
-	InputChannel int
-	Source       Source
-	Armed        bool
-	Muted        bool
-	Soloed       bool
-	VolumeDB     float64
-	Pan          float64
-	PrintEffects bool
-	Effects      mix.Effects
-	ActiveTakeID TakeID
+	ID            TrackID
+	Name          string
+	InputChannel  int
+	Source        Source
+	Armed         bool
+	Muted         bool
+	Soloed        bool
+	VolumeDB      float64
+	Pan           float64
+	PrintEffects  bool
+	Effects       mix.Effects
+	ActiveTakeID  TakeID
+	Repeat        int
+	PatternFrames int
 }
 
 // TakeState is the persistence- and transport-neutral shape of a take.

@@ -3,7 +3,7 @@
 
 import * as storage from "./storage.js";
 import { AudioEngine, encodeWav, renderMixdown } from "./audio.js";
-import { clipAt, computePeaks, drawTimeline, frameAtX, markerAtX } from "./waveform.js";
+import { clipAt, computePeaks, drawTimeline, frameAtX, markerAtX, midiLoopHandleAt, midiResizeHandleAt } from "./waveform.js";
 import { audibleNoteTracks, audibleTakes, formatDuration, takeLength } from "./model.js";
 import { buildNoteEditor } from "./notes.js";
 import { buildDrumEditor } from "./drums.js";
@@ -30,6 +30,8 @@ const App = {
   pendingTake: null,
   clipboard: null,
   drag: null,
+  loopPreview: null,
+  patternPreview: null,
   rafHandle: 0,
   sessions: [],
   saving: Promise.resolve(),
@@ -1454,6 +1456,46 @@ function startTimelinePointer(event) {
   if (event.button !== 0) return;
   const canvas = event.currentTarget;
   const point = timelinePoint(event);
+  const resizeHandle = midiResizeHandleAt(canvas, point.x, point.y);
+  if (resizeHandle) {
+    event.preventDefault();
+    if (App.selectedTrackId !== resizeHandle.trackId) selectTrack(resizeHandle.trackId);
+    App.drag = {
+      kind: "pattern",
+      pointerId: event.pointerId,
+      canvas,
+      trackId: resizeHandle.trackId,
+      originFrames: resizeHandle.patternFrames,
+      minFrames: resizeHandle.minFrames,
+      frames: resizeHandle.patternFrames,
+      startX: point.x,
+      pxPerFrame: canvas.layout?.pxPerFrame || 1,
+      moved: false,
+    };
+    canvas.setPointerCapture(event.pointerId);
+    canvas.style.cursor = "ew-resize";
+    return;
+  }
+  const loopHandle = midiLoopHandleAt(canvas, point.x, point.y);
+  if (loopHandle) {
+    event.preventDefault();
+    if (App.selectedTrackId !== loopHandle.trackId) selectTrack(loopHandle.trackId);
+    App.drag = {
+      kind: "loop",
+      pointerId: event.pointerId,
+      canvas,
+      trackId: loopHandle.trackId,
+      patternFrames: loopHandle.patternFrames,
+      originRepeats: loopHandle.repeats,
+      repeats: loopHandle.repeats,
+      startX: point.x,
+      pxPerFrame: canvas.layout?.pxPerFrame || 1,
+      moved: false,
+    };
+    canvas.setPointerCapture(event.pointerId);
+    canvas.style.cursor = "ew-resize";
+    return;
+  }
   const clip = clipAt(canvas, point.x, point.y);
   if (!clip) {
     if (App.selectedTakeId) {
@@ -1484,13 +1526,33 @@ function moveTimelinePointer(event) {
   const drag = App.drag;
   if (!drag || drag.pointerId !== event.pointerId) {
     const point = timelinePoint(event);
-    canvas.style.cursor = clipAt(canvas, point.x, point.y) ? "grab" : "text";
+    const onHandle = midiResizeHandleAt(canvas, point.x, point.y) || midiLoopHandleAt(canvas, point.x, point.y);
+    canvas.style.cursor = onHandle ? "ew-resize" : clipAt(canvas, point.x, point.y) ? "grab" : "text";
     return;
   }
   if (!canvas.hasPointerCapture(event.pointerId)) return;
   const point = timelinePoint(event);
   if (Math.abs(point.x - drag.startX) > 2) drag.moved = true;
   if (!drag.moved) return;
+  if (drag.kind === "pattern") {
+    const beatFrames = (App.state.sampleRate * 60) / Math.max(20, Number(App.state.click.BPM) || 120);
+    const step = Math.max(1, Math.round(beatFrames / 4));
+    const maxFrames = Math.round(beatFrames * Math.max(1, Number(App.state.click.beatsPerBar) || 4) * 64);
+    const delta = Math.round((point.x - drag.startX) / drag.pxPerFrame);
+    const frames = Math.max(drag.minFrames, Math.min(maxFrames, Math.round((drag.originFrames + delta) / step) * step));
+    drag.frames = frames;
+    App.patternPreview = { trackId: drag.trackId, frames };
+    drawTimelineNow();
+    return;
+  }
+  if (drag.kind === "loop") {
+    const delta = Math.round((point.x - drag.startX) / drag.pxPerFrame);
+    const repeats = Math.max(0, Math.min(32, drag.originRepeats + Math.round(delta / Math.max(1, drag.patternFrames))));
+    drag.repeats = repeats;
+    App.loopPreview = { trackId: drag.trackId, repeats };
+    drawTimelineNow();
+    return;
+  }
   const take = App.state?.takes.find((candidate) => candidate.id === drag.takeId);
   if (!take) return;
   const delta = Math.round((point.x - drag.startX) / drag.pxPerFrame);
@@ -1505,6 +1567,34 @@ function finishTimelinePointer(event, cancelled) {
   const canvas = drag.canvas;
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   canvas.style.cursor = "text";
+  if (drag.kind === "pattern") {
+    App.patternPreview = null;
+    if (cancelled || !drag.moved) {
+      drawTimelineNow();
+      return;
+    }
+    const frames = drag.frames;
+    dispatch("track.pattern", { trackId: drag.trackId, frames }).then((result) => {
+      drawTimelineNow();
+      if (!result) return;
+      const beatFrames = (App.state.sampleRate * 60) / Math.max(20, Number(App.state.click.BPM) || 120);
+      setStatus(`Pattern length: ${(frames / beatFrames).toFixed(2)} beats`);
+    });
+    return;
+  }
+  if (drag.kind === "loop") {
+    App.loopPreview = null;
+    if (cancelled || !drag.moved) {
+      drawTimelineNow();
+      return;
+    }
+    const repeats = drag.repeats;
+    dispatch("track.repeat", { trackId: drag.trackId, repeat: repeats }).then((result) => {
+      drawTimelineNow();
+      if (result) setStatus(repeats ? `Looped ×${repeats + 1}` : "Loop removed");
+    });
+    return;
+  }
   const take = App.state?.takes.find((candidate) => candidate.id === drag.takeId);
   if (cancelled || !drag.moved) {
     if (take) take.startFrame = drag.originFrame;
@@ -1666,6 +1756,8 @@ function drawTimelineNow() {
     startFrame: App.viewStart,
     follow: App.playing || App.recording,
     selectedTrackId: App.selectedTrackId,
+    loopPreview: App.loopPreview,
+    patternPreview: App.patternPreview,
   });
   if (canvas.layout) App.viewStart = canvas.layout.startFrame;
 }

@@ -36,6 +36,28 @@ func (s *Service) RenameTrack(id session.TrackID, name string) error {
 	return s.Save()
 }
 
+// SetRepeat loops an instrument track's pattern the given number of times.
+func (s *Service) SetRepeat(id session.TrackID, repeat int) error {
+	if err := s.requireSession(); err != nil {
+		return err
+	}
+	if err := s.current.SetRepeat(id, repeat); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
+// SetPatternFrames widens an instrument pattern past its last note.
+func (s *Service) SetPatternFrames(id session.TrackID, frames int) error {
+	if err := s.requireSession(); err != nil {
+		return err
+	}
+	if err := s.current.SetPatternFrames(id, frames); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
 // SetArm arms or disarms a track and refuses conflicting sources.
 func (s *Service) SetArm(id session.TrackID, armed bool) error {
 	if err := s.requireSession(); err != nil {

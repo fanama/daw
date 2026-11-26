@@ -8,12 +8,13 @@ import (
 	"fanamix/domain/session"
 )
 
-// SchemaVersion is the project file version this build writes. Version 6 adds
-// notes for instrument tracks; version 5 stores effect chains as ordered
-// lists; version 4 lets PC audio tracks carry their own effects; version 3 adds
-// layered take segments; version 2 stores the five-band equalizer; version 1
-// projects are migrated when loaded.
-const SchemaVersion = 6
+// SchemaVersion is the project file version this build writes. Version 8 lets
+// an instrument pattern be widened past its notes; version 7 loops instrument
+// patterns; version 6 adds notes for instrument tracks; version 5
+// stores effect chains as ordered lists; version 4 lets PC audio tracks carry
+// their own effects; version 3 adds layered take segments; version 2 stores the
+// five-band equalizer; version 1 projects are migrated when loaded.
+const SchemaVersion = 8
 
 // ErrUnsupportedSchema is returned when a project was written by a newer app.
 var ErrUnsupportedSchema = errors.New("jsonstore: project schema is newer than this app")
@@ -49,18 +50,20 @@ type sourceJSON struct {
 }
 
 type trackJSON struct {
-	ID           string      `json:"id"`
-	Name         string      `json:"name"`
-	InputChannel int         `json:"inputChannel"`
-	Source       sourceJSON  `json:"source"`
-	Armed        bool        `json:"armed"`
-	Mute         bool        `json:"mute"`
-	Solo         bool        `json:"solo"`
-	VolumeDB     float64     `json:"volumeDb"`
-	Pan          float64     `json:"pan"`
-	PrintEffects bool        `json:"printEffects"`
-	Effects      effectsJSON `json:"effects"`
-	ActiveTakeID string      `json:"activeTakeId"`
+	ID            string      `json:"id"`
+	Name          string      `json:"name"`
+	InputChannel  int         `json:"inputChannel"`
+	Source        sourceJSON  `json:"source"`
+	Armed         bool        `json:"armed"`
+	Mute          bool        `json:"mute"`
+	Solo          bool        `json:"solo"`
+	VolumeDB      float64     `json:"volumeDb"`
+	Pan           float64     `json:"pan"`
+	PrintEffects  bool        `json:"printEffects"`
+	Effects       effectsJSON `json:"effects"`
+	ActiveTakeID  string      `json:"activeTakeId"`
+	Repeat        int         `json:"repeat,omitempty"`
+	PatternFrames int         `json:"patternFrames,omitempty"`
 }
 
 type trimJSON struct {
@@ -132,18 +135,20 @@ func tracksFromState(tracks []session.TrackState) []trackJSON {
 
 func trackFromState(track session.TrackState) trackJSON {
 	return trackJSON{
-		ID:           track.ID.String(),
-		Name:         track.Name,
-		InputChannel: track.InputChannel,
-		Source:       sourceJSON{Kind: string(track.Source.Kind), Channel: track.Source.Channel, Instrument: string(track.Source.Instrument)},
-		Armed:        track.Armed,
-		Mute:         track.Muted,
-		Solo:         track.Soloed,
-		VolumeDB:     track.VolumeDB,
-		Pan:          track.Pan,
-		PrintEffects: track.PrintEffects,
-		Effects:      effectsFromDomain(track.Effects),
-		ActiveTakeID: track.ActiveTakeID.String(),
+		ID:            track.ID.String(),
+		Name:          track.Name,
+		InputChannel:  track.InputChannel,
+		Source:        sourceJSON{Kind: string(track.Source.Kind), Channel: track.Source.Channel, Instrument: string(track.Source.Instrument)},
+		Armed:         track.Armed,
+		Mute:          track.Muted,
+		Solo:          track.Soloed,
+		VolumeDB:      track.VolumeDB,
+		Pan:           track.Pan,
+		PrintEffects:  track.PrintEffects,
+		Effects:       effectsFromDomain(track.Effects),
+		ActiveTakeID:  track.ActiveTakeID.String(),
+		Repeat:        track.Repeat,
+		PatternFrames: track.PatternFrames,
 	}
 }
 
@@ -220,18 +225,20 @@ func tracksToState(tracks []trackJSON) []session.TrackState {
 			source = session.InputSource(track.InputChannel)
 		}
 		restored = append(restored, session.TrackState{
-			ID:           session.TrackID(track.ID),
-			Name:         track.Name,
-			InputChannel: track.InputChannel,
-			Source:       source,
-			Armed:        track.Armed,
-			Muted:        track.Mute,
-			Soloed:       track.Solo,
-			VolumeDB:     track.VolumeDB,
-			Pan:          track.Pan,
-			PrintEffects: track.PrintEffects,
-			Effects:      effectsToDomain(track.Effects),
-			ActiveTakeID: session.TakeID(track.ActiveTakeID),
+			ID:            session.TrackID(track.ID),
+			Name:          track.Name,
+			InputChannel:  track.InputChannel,
+			Source:        source,
+			Armed:         track.Armed,
+			Muted:         track.Mute,
+			Soloed:        track.Solo,
+			VolumeDB:      track.VolumeDB,
+			Pan:           track.Pan,
+			PrintEffects:  track.PrintEffects,
+			Effects:       effectsToDomain(track.Effects),
+			ActiveTakeID:  session.TakeID(track.ActiveTakeID),
+			Repeat:        track.Repeat,
+			PatternFrames: track.PatternFrames,
 		})
 	}
 	return restored

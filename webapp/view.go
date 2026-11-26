@@ -50,19 +50,21 @@ type webNote struct {
 
 // webTrack is one track in browser shape.
 type webTrack struct {
-	ID           string      `json:"id"`
-	Name         string      `json:"name"`
-	Source       string      `json:"source"`
-	Channel      int         `json:"channel"`
-	Instrument   string      `json:"instrument,omitempty"`
-	Armed        bool        `json:"armed"`
-	Muted        bool        `json:"muted"`
-	Soloed       bool        `json:"soloed"`
-	VolumeDB     float64     `json:"volumeDb"`
-	Pan          float64     `json:"pan"`
-	PrintEffects bool        `json:"printEffects"`
-	ActiveTakeID string      `json:"activeTakeId"`
-	Effects      mix.Effects `json:"effects"`
+	ID            string      `json:"id"`
+	Name          string      `json:"name"`
+	Source        string      `json:"source"`
+	Channel       int         `json:"channel"`
+	Instrument    string      `json:"instrument,omitempty"`
+	Armed         bool        `json:"armed"`
+	Muted         bool        `json:"muted"`
+	Soloed        bool        `json:"soloed"`
+	VolumeDB      float64     `json:"volumeDb"`
+	Pan           float64     `json:"pan"`
+	PrintEffects  bool        `json:"printEffects"`
+	ActiveTakeID  string      `json:"activeTakeId"`
+	Repeat        int         `json:"repeat"`
+	PatternFrames int         `json:"patternFrames"`
+	Effects       mix.Effects `json:"effects"`
 }
 
 // webTake is one take in browser shape.
@@ -144,6 +146,7 @@ type request struct {
 	Index        int          `json:"index"`
 	From         int          `json:"from"`
 	To           int          `json:"to"`
+	Repeat       int          `json:"repeat"`
 	Effects      *mix.Effects `json:"effects"`
 }
 
@@ -209,19 +212,21 @@ func newWebTrack(track session.TrackState) webTrack {
 		source = "instrument"
 	}
 	return webTrack{
-		ID:           track.ID.String(),
-		Name:         track.Name,
-		Source:       source,
-		Channel:      track.InputChannel,
-		Instrument:   string(track.Source.Instrument),
-		Armed:        track.Armed,
-		Muted:        track.Muted,
-		Soloed:       track.Soloed,
-		VolumeDB:     track.VolumeDB,
-		Pan:          track.Pan,
-		PrintEffects: track.PrintEffects,
-		ActiveTakeID: track.ActiveTakeID.String(),
-		Effects:      track.Effects,
+		ID:            track.ID.String(),
+		Name:          track.Name,
+		Source:        source,
+		Channel:       track.InputChannel,
+		Instrument:    string(track.Source.Instrument),
+		Armed:         track.Armed,
+		Muted:         track.Muted,
+		Soloed:        track.Soloed,
+		VolumeDB:      track.VolumeDB,
+		Pan:           track.Pan,
+		PrintEffects:  track.PrintEffects,
+		ActiveTakeID:  track.ActiveTakeID.String(),
+		Repeat:        track.Repeat,
+		PatternFrames: track.PatternFrames,
+		Effects:       track.Effects,
 	}
 }
 

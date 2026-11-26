@@ -10,17 +10,19 @@ import (
 // Track is one recorded part: an audio source with its own effect chain and an
 // active take. Mutations belong to the Session aggregate.
 type Track struct {
-	id           TrackID
-	name         string
-	source       Source
-	armed        bool
-	muted        bool
-	soloed       bool
-	volumeDB     float64
-	pan          float64
-	printEffects bool
-	effects      mix.Effects
-	activeTakeID TakeID
+	id            TrackID
+	name          string
+	source        Source
+	armed         bool
+	muted         bool
+	soloed        bool
+	volumeDB      float64
+	pan           float64
+	printEffects  bool
+	effects       mix.Effects
+	activeTakeID  TakeID
+	repeat        int
+	patternFrames int
 }
 
 // NewTrack builds a track bound to one interface channel.
@@ -101,6 +103,13 @@ func (t Track) Effects() mix.Effects { return t.effects }
 // ActiveTakeID returns the audible take, if one was chosen.
 func (t Track) ActiveTakeID() TakeID { return t.activeTakeID }
 
+// Repeat returns how many extra times an instrument pattern plays after it.
+func (t Track) Repeat() int { return t.repeat }
+
+// PatternFrames is the looped length of an instrument pattern. Zero derives it
+// from the notes, so widening a region can include trailing silence.
+func (t Track) PatternFrames() int { return t.patternFrames }
+
 // IsAudible resolves mute and solo across the session.
 func (t Track) IsAudible(anySolo bool) bool {
 	if t.muted {
@@ -111,18 +120,20 @@ func (t Track) IsAudible(anySolo bool) bool {
 
 func (t Track) state() TrackState {
 	return TrackState{
-		ID:           t.id,
-		Name:         t.name,
-		InputChannel: t.InputChannel(),
-		Source:       t.source,
-		Armed:        t.armed,
-		Muted:        t.muted,
-		Soloed:       t.soloed,
-		VolumeDB:     t.volumeDB,
-		Pan:          t.pan,
-		PrintEffects: t.printEffects,
-		Effects:      t.effects,
-		ActiveTakeID: t.activeTakeID,
+		ID:            t.id,
+		Name:          t.name,
+		InputChannel:  t.InputChannel(),
+		Source:        t.source,
+		Armed:         t.armed,
+		Muted:         t.muted,
+		Soloed:        t.soloed,
+		VolumeDB:      t.volumeDB,
+		Pan:           t.pan,
+		PrintEffects:  t.printEffects,
+		Effects:       t.effects,
+		ActiveTakeID:  t.activeTakeID,
+		Repeat:        t.repeat,
+		PatternFrames: t.patternFrames,
 	}
 }
 
@@ -143,6 +154,8 @@ func trackFromState(state TrackState) (Track, error) {
 	track.printEffects = state.PrintEffects && track.source.IsInput()
 	track.effects = state.Effects.Normalize()
 	track.activeTakeID = state.ActiveTakeID
+	track.repeat = clampRepeat(state.Repeat)
+	track.patternFrames = clampPatternFrames(state.PatternFrames)
 	return track, nil
 }
 
@@ -157,6 +170,27 @@ func clampVolumeDB(value float64) float64 {
 		return 0
 	}
 	return math.Max(MinTrackVolumeDB, math.Min(MaxTrackVolumeDB, value))
+}
+
+// MaxTrackRepeat bounds how many copies one instrument pattern can loop to,
+// so a drag cannot grow the timeline without end.
+const MaxTrackRepeat = 32
+
+func clampPatternFrames(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func clampRepeat(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > MaxTrackRepeat {
+		return MaxTrackRepeat
+	}
+	return value
 }
 
 // Track pan is a monitor control too: -1 is hard left, 1 hard right.
