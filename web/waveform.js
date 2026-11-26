@@ -161,11 +161,12 @@ function drawMidiRegion(context, track, notes, y, laneHeight, layout, view) {
   const preview = view.loopPreview && view.loopPreview.trackId === track.id ? view.loopPreview.repeats : null;
   const repeats = Math.max(0, Math.min(32, preview === null ? Number(track.repeat) || 0 : preview));
   const selected = track.id === view.selectedTrackId;
+  const motifSelected = track.id === view.selectedMotifTrackId;
   const total = width * (1 + repeats);
-  context.fillStyle = selected ? "#1c4b3e" : "#173c32";
+  context.fillStyle = motifSelected ? "#256b53" : selected ? "#1c4b3e" : "#173c32";
   context.fillRect(x, top, total, height);
-  context.strokeStyle = selected ? "#8be8c5" : "#3c8f74";
-  context.lineWidth = selected ? 1.5 : 1;
+  context.strokeStyle = motifSelected ? "#d9fff2" : selected ? "#8be8c5" : "#3c8f74";
+  context.lineWidth = motifSelected ? 2 : selected ? 1.5 : 1;
   context.strokeRect(x + 0.5, top + 0.5, Math.max(1, total - 1), Math.max(1, height - 1));
   context.strokeStyle = "#2f6f5b";
   context.setLineDash([4, 3]);
@@ -193,7 +194,7 @@ function drawMidiRegion(context, track, notes, y, laneHeight, layout, view) {
     patternFrames: pattern,
     repeats,
   };
-  context.fillStyle = selected ? "#8be8c5" : "#5fae91";
+  context.fillStyle = selected || motifSelected ? "#8be8c5" : "#5fae91";
   context.fillRect(handle.x, handle.y, handle.width, handle.height);
   const resize = {
     trackId: track.id,
@@ -210,7 +211,8 @@ function drawMidiRegion(context, track, notes, y, laneHeight, layout, view) {
   context.lineTo(resize.x + resize.width, resize.y);
   context.closePath();
   context.fill();
-  return { ...handle, resize };
+  const region = { trackId: track.id, x, y: top, width: total, height };
+  return { ...handle, resize, region };
 }
 
 function drawLive(context, live, y, laneHeight, layout) {
@@ -397,6 +399,17 @@ export function midiLoopHandleAt(canvas, x, y) {
   for (const handle of canvas.midiHandles || []) {
     if (x < handle.x || x > handle.x + handle.width || y < handle.y || y > handle.y + handle.height) continue;
     return handle;
+  }
+  return null;
+}
+
+// midiRegionAt returns the MIDI motif under a canvas point, if any.
+export function midiRegionAt(canvas, x, y) {
+  for (const handle of canvas.midiHandles || []) {
+    const region = handle.region;
+    if (!region) continue;
+    if (x < region.x || x > region.x + region.width || y < region.y || y > region.y + region.height) continue;
+    return region;
   }
   return null;
 }

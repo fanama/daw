@@ -121,3 +121,36 @@ func TestNoteCommandsRejectAVoiceTrackAndBadPitch(t *testing.T) {
 		t.Fatalf("unknown note must not be found, got %v", err)
 	}
 }
+
+func TestClearNotesDeletesTheWholeMotif(t *testing.T) {
+	s := newSession(t)
+	track, err := s.AddTrackWithSource("Keys", session.InstrumentSource(session.InstrumentPiano))
+	if err != nil {
+		t.Fatalf("add instrument track: %v", err)
+	}
+	for _, start := range []int{0, 4800} {
+		if _, err := s.AddNote(track.ID(), 60, start, 4800, 100); err != nil {
+			t.Fatalf("add note at %d: %v", start, err)
+		}
+	}
+	if err := s.SetRepeat(track.ID(), 2); err != nil {
+		t.Fatalf("set repeat: %v", err)
+	}
+	if err := s.SetPatternFrames(track.ID(), 24000); err != nil {
+		t.Fatalf("set pattern frames: %v", err)
+	}
+
+	if err := s.ClearNotes(track.ID()); err != nil {
+		t.Fatalf("clear notes: %v", err)
+	}
+	if kept := s.TrackNotes(track.ID()); len(kept) != 0 {
+		t.Fatalf("expected no notes left, got %d", len(kept))
+	}
+	cleared, ok := s.FindTrack(track.ID())
+	if !ok || cleared.Repeat() != 0 || cleared.PatternFrames() != 0 {
+		t.Fatalf("loop and widening were not reset: %+v", cleared)
+	}
+	if err := s.ClearNotes(track.ID()); !session.IsCode(err, session.CodeNotFound) {
+		t.Fatalf("an empty track has no motif to clear, got %v", err)
+	}
+}

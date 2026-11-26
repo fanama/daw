@@ -25,6 +25,17 @@ func (s *Service) RemoveNote(id session.NoteID) error {
 	return s.Save()
 }
 
+// ClearNotes deletes a whole motif, including its repetitions and widening.
+func (s *Service) ClearNotes(trackID session.TrackID) error {
+	if err := s.requireSession(); err != nil {
+		return err
+	}
+	if err := s.current.ClearNotes(trackID); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
 // MoveNote changes a note's pitch and start position.
 func (s *Service) MoveNote(id session.NoteID, pitch, startFrame int) error {
 	if err := s.requireSession(); err != nil {

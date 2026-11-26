@@ -54,7 +54,7 @@
             <button type="button" data-action="split"><span>Split take at playhead</span><kbd>S</kbd></button>
             <button type="button" data-action="copy"><span>Copy take</span><kbd>Ctrl/Cmd+C</kbd></button>
             <button type="button" data-action="paste"><span>Paste at playhead</span><kbd>Ctrl/Cmd+V</kbd></button>
-            <button type="button" data-action="deleteTake"><span>Delete selected take</span><kbd>Del</kbd></button>
+            <button type="button" data-action="deleteTake"><span>Delete selection</span><kbd>Del</kbd></button>
             <button type="button" data-action="undo"><span>Undo</span><kbd>Ctrl/Cmd+Z</kbd></button>
             <button type="button" data-action="export"><span>Export WAV</span><kbd>—</kbd></button>
             <div class="shortcut-head"><strong>View</strong></div>
@@ -88,13 +88,13 @@
           </span>
         </div>
         <div id="track-list" class="track-list"></div>
-        <p class="hint">Arm <b>●</b> to record; press <b>L</b> to listen without arming. PC and input tracks can be recorded or monitored together. Click a clip to select it; <b>Del</b> removes it, <b>Ctrl/Cmd+Z</b> undoes the last edit. <b>S</b> splits a take at the playhead; <b>Ctrl/Cmd+C</b> copies it and <b>Ctrl/Cmd+V</b> pastes it there. MIDI tracks play piano, bass or guitar notes drawn in the piano roll.</p>
+        <p class="hint">Arm <b>●</b> to record; press <b>L</b> to listen without arming. PC and input tracks can be recorded or monitored together. Click a clip or a MIDI motif to select it; <b>Del</b> removes it, <b>Ctrl/Cmd+Z</b> undoes the last edit. <b>S</b> splits a take at the playhead; <b>Ctrl/Cmd+C</b> copies it and <b>Ctrl/Cmd+V</b> pastes it there. MIDI tracks play piano, bass or guitar notes drawn in the piano roll.</p>
       </aside>
 
       <div id="tracks-resizer" class="resizer" role="separator" aria-orientation="vertical" aria-label="Resize the track panel" aria-valuemin="180" aria-valuemax="520" aria-valuenow="250" tabindex="0" title="Drag to resize the track panel"></div>
 
       <section class="timeline">
-        <canvas id="timeline" title="Click a clip to select · Del delete · Ctrl/Cmd+Z undo · S split · Ctrl/Cmd+C/V copy and paste at the playhead"></canvas>
+        <canvas id="timeline" title="Click a clip or a motif to select · Del delete · Ctrl/Cmd+Z undo · S split · Ctrl/Cmd+C/V copy and paste at the playhead"></canvas>
       </section>
 
       <aside id="inspector" class="inspector"></aside>

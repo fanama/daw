@@ -30,6 +30,33 @@ func (s *Session) RemoveNote(id NoteID) error {
 	return nil
 }
 
+// ClearNotes deletes a whole motif: every note of an instrument track together
+// with its repetitions and its widened length, so the region leaves the
+// timeline in one edit that undo restores at once.
+func (s *Session) ClearNotes(trackID TrackID) error {
+	index, err := s.trackIndex(trackID)
+	if err != nil {
+		return err
+	}
+	if !s.tracks[index].source.IsInstrument() {
+		return invalid("track %q is not an instrument track", s.tracks[index].name)
+	}
+	if len(s.TrackNotes(trackID)) == 0 {
+		return notFound("track %q has no motif", s.tracks[index].name)
+	}
+	kept := make([]Note, 0, len(s.notes))
+	for _, note := range s.notes {
+		if note.trackID == trackID {
+			continue
+		}
+		kept = append(kept, note)
+	}
+	s.notes = kept
+	s.tracks[index].repeat = 0
+	s.tracks[index].patternFrames = 0
+	return nil
+}
+
 // MoveNote changes a note's pitch and start position.
 func (s *Session) MoveNote(id NoteID, pitch, startFrame int) error {
 	index, err := s.noteIndex(id)

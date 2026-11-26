@@ -221,6 +221,11 @@ to include trailing silence, and the repetitions then start after that longer
 pattern. It cannot shrink below the notes; use the loop handle to change the
 number of copies.
 
+Click a region to select the motif, then press **Del** (or the shortcut menu) to
+delete it: its notes, its repetitions and its widened length go together, and
+**Ctrl/Cmd+Z** brings the motif back in one step. Audio clips are selected and
+deleted the same way.
+
 A **Drums** track opens on a step sequencer instead: one row per kit piece
 (kick, snare, clap, hats, toms, cymbals), sixteen sixteenth-note steps per bar.
 Click or drag across steps to fill a beat, click a filled step again to erase

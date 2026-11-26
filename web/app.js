@@ -3,7 +3,7 @@
 
 import * as storage from "./storage.js";
 import { AudioEngine, encodeWav, renderMixdown } from "./audio.js";
-import { clipAt, computePeaks, drawTimeline, frameAtX, markerAtX, midiLoopHandleAt, midiResizeHandleAt } from "./waveform.js";
+import { clipAt, computePeaks, drawTimeline, frameAtX, markerAtX, midiLoopHandleAt, midiRegionAt, midiResizeHandleAt } from "./waveform.js";
 import { audibleNoteTracks, audibleTakes, formatDuration, takeLength } from "./model.js";
 import { buildNoteEditor } from "./notes.js";
 import { buildDrumEditor } from "./drums.js";
@@ -21,6 +21,7 @@ const App = {
   monitored: new Set(),
   selectedTrackId: null,
   selectedTakeId: null,
+  selectedMotifTrackId: null,
   frame: 0,
   zoom: 1,
   viewStart: 0,
@@ -230,7 +231,7 @@ function bindControls() {
     split: splitTakeAtPlayhead,
     copy: copyTakeAtPlayhead,
     paste: pasteTakeAtPlayhead,
-    deleteTake: deleteSelectedTake,
+    deleteTake: deleteSelection,
     undo: undoLastEdit,
     export: exportMix,
     zoomIn: () => zoomTo(App.zoom * 1.5),
@@ -292,7 +293,7 @@ function bindControls() {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (key === "delete" || key === "backspace") {
       event.preventDefault();
-      deleteSelectedTake();
+      deleteSelection();
       return;
     }
     if (key === "s") splitTakeAtPlayhead();
@@ -373,6 +374,9 @@ function applyState(next) {
   if (App.selectedTakeId && !next.takes.some((take) => take.id === App.selectedTakeId)) {
     App.selectedTakeId = null;
   }
+  if (App.selectedMotifTrackId && !next.tracks.some((track) => track.id === App.selectedMotifTrackId)) {
+    App.selectedMotifTrackId = null;
+  }
   restoreAudioTrash(next);
   pruneAudio(next);
   const trackIds = new Set(next.tracks.map((track) => track.id));
@@ -434,10 +438,29 @@ async function deleteTake(takeId) {
   if (result) setStatus("Take deleted — Ctrl/Cmd+Z restores it");
 }
 
-async function deleteSelectedTake() {
+function motifNotes(track) {
+  return (App.state?.notes || []).filter((note) => note.trackId === track.id);
+}
+
+// deleteSelection removes the selected clip, or the selected MIDI motif.
+async function deleteSelection() {
+  const track = App.state?.tracks.find((candidate) => candidate.id === App.selectedMotifTrackId);
+  if (track && motifNotes(track).length) return deleteMotif(track);
   const take = selectedTake();
-  if (!take) return setStatus("Select a clip in the timeline to delete it.", "error");
+  if (!take) return setStatus("Select a clip or a MIDI motif in the timeline to delete it.", "error");
   await deleteTake(take.id);
+}
+
+// deleteMotif removes a whole pattern: its notes, its repetitions and its
+// widening, leaving the track empty the way deleting its last take does.
+async function deleteMotif(track) {
+  if (!App.state || App.recording) return;
+  if (!motifNotes(track).length) return;
+  if (!window.confirm(`Delete the motif on ${track.name}?`)) return;
+  if (App.playing) stopTransport();
+  App.selectedMotifTrackId = null;
+  const result = await dispatch("note.clear", { trackId: track.id });
+  if (result) setStatus("Motif deleted — Ctrl/Cmd+Z restores it");
 }
 
 async function undoLastEdit() {
@@ -452,6 +475,7 @@ function currentTrack() {
 }
 
 function selectTrack(id) {
+  if (id !== App.selectedMotifTrackId) App.selectedMotifTrackId = null;
   App.selectedTrackId = id;
   renderTracks();
   renderInspector();
@@ -1496,16 +1520,30 @@ function startTimelinePointer(event) {
     canvas.style.cursor = "ew-resize";
     return;
   }
+  const region = midiRegionAt(canvas, point.x, point.y);
+  if (region) {
+    event.preventDefault();
+    App.selectedTakeId = null;
+    App.selectedMotifTrackId = region.trackId;
+    if (App.selectedTrackId !== region.trackId) selectTrack(region.trackId);
+    else {
+      renderTracks();
+      drawTimelineNow();
+    }
+    return;
+  }
   const clip = clipAt(canvas, point.x, point.y);
   if (!clip) {
-    if (App.selectedTakeId) {
+    if (App.selectedTakeId || App.selectedMotifTrackId) {
       App.selectedTakeId = null;
+      App.selectedMotifTrackId = null;
       drawTimelineNow();
     }
     return seekFromPointer(event);
   }
   event.preventDefault();
   App.selectedTakeId = clip.takeId;
+  App.selectedMotifTrackId = null;
   if (App.selectedTrackId !== clip.trackId) selectTrack(clip.trackId);
   else drawTimelineNow();
   App.drag = {
@@ -1527,7 +1565,8 @@ function moveTimelinePointer(event) {
   if (!drag || drag.pointerId !== event.pointerId) {
     const point = timelinePoint(event);
     const onHandle = midiResizeHandleAt(canvas, point.x, point.y) || midiLoopHandleAt(canvas, point.x, point.y);
-    canvas.style.cursor = onHandle ? "ew-resize" : clipAt(canvas, point.x, point.y) ? "grab" : "text";
+    const onClip = clipAt(canvas, point.x, point.y) || midiRegionAt(canvas, point.x, point.y);
+    canvas.style.cursor = onHandle ? "ew-resize" : onClip ? "grab" : "text";
     return;
   }
   if (!canvas.hasPointerCapture(event.pointerId)) return;
@@ -1756,6 +1795,7 @@ function drawTimelineNow() {
     startFrame: App.viewStart,
     follow: App.playing || App.recording,
     selectedTrackId: App.selectedTrackId,
+    selectedMotifTrackId: App.selectedMotifTrackId,
     loopPreview: App.loopPreview,
     patternPreview: App.patternPreview,
   });
@@ -1928,6 +1968,7 @@ async function openSession(root) {
     App.pendingTake = null;
     App.selectedTrackId = null;
     App.selectedTakeId = null;
+    App.selectedMotifTrackId = null;
     App.zoom = 1;
     App.viewStart = 0;
     applyState(result.state);
@@ -1961,6 +2002,7 @@ async function createSession(name, sampleRate) {
     App.pendingTake = null;
     App.selectedTrackId = null;
     App.selectedTakeId = null;
+    App.selectedMotifTrackId = null;
     App.zoom = 1;
     App.viewStart = 0;
     applyState(result.state);

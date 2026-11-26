@@ -20,6 +20,8 @@ func (c *core) applyNote(req request) error {
 		return c.service.MoveNote(noteID, req.Pitch, req.StartFrame)
 	case "note.resize":
 		return c.service.ResizeNote(noteID, req.LengthFrames)
+	case "note.clear":
+		return c.service.ClearNotes(session.TrackID(req.TrackID))
 	default:
 		return fmt.Errorf("unknown note command %q", req.Op)
 	}
