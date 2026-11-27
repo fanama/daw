@@ -30,6 +30,8 @@ const App = {
   countingIn: false,
   pendingTake: null,
   clipboard: null,
+  noteSelection: { trackId: null, ids: [] },
+  noteClipboard: null,
   drag: null,
   loopPreview: null,
   patternPreview: null,
@@ -275,12 +277,12 @@ function bindControls() {
     }
     if ((event.metaKey || event.ctrlKey) && key === "c") {
       event.preventDefault();
-      copyTakeAtPlayhead();
+      if (!copySelectedNotes()) copyTakeAtPlayhead();
       return;
     }
     if ((event.metaKey || event.ctrlKey) && key === "v") {
       event.preventDefault();
-      pasteTakeAtPlayhead();
+      if (!pasteNotes()) pasteTakeAtPlayhead();
       return;
     }
     if (event.code === "Space") {
@@ -377,6 +379,11 @@ function applyState(next) {
   if (App.selectedMotifTrackId && !next.tracks.some((track) => track.id === App.selectedMotifTrackId)) {
     App.selectedMotifTrackId = null;
   }
+  const noteIds = new Set((next.notes || []).map((note) => note.id));
+  const keptNotes = App.noteSelection.ids.filter((id) => noteIds.has(id));
+  if (keptNotes.length !== App.noteSelection.ids.length) {
+    App.noteSelection = { trackId: App.noteSelection.trackId, ids: keptNotes };
+  }
   restoreAudioTrash(next);
   pruneAudio(next);
   const trackIds = new Set(next.tracks.map((track) => track.id));
@@ -442,8 +449,80 @@ function motifNotes(track) {
   return (App.state?.notes || []).filter((note) => note.trackId === track.id);
 }
 
-// deleteSelection removes the selected clip, or the selected MIDI motif.
+// selectedNoteIds are the piano-roll notes of the track shown in the inspector.
+function selectedNoteIds() {
+  if (App.noteSelection.trackId !== App.selectedTrackId) return [];
+  return App.noteSelection.ids;
+}
+
+// copySelectedNotes fills the note clipboard with the piano-roll selection and
+// reports whether it handled the copy, so the take shortcut stays a fallback.
+function copySelectedNotes() {
+  const ids = new Set(selectedNoteIds());
+  const picked = (App.state?.notes || []).filter((note) => ids.has(note.id));
+  if (!picked.length) return false;
+  const start = Math.min(...picked.map((note) => note.startFrame));
+  const end = Math.max(...picked.map((note) => note.startFrame + note.lengthFrames));
+  App.noteClipboard = {
+    start,
+    span: Math.max(1, end - start),
+    notes: picked.map((note) => ({
+      pitch: note.pitch,
+      startFrame: note.startFrame - start,
+      lengthFrames: note.lengthFrames,
+      velocity: note.velocity,
+    })),
+  };
+  setStatus(`${picked.length} note${picked.length === 1 ? "" : "s"} copied`);
+  return true;
+}
+
+// pasteNotes drops the clipboard at the playhead on the open instrument track
+// and selects the result, so it can be moved straight away.
+function pasteNotes() {
+  const clip = App.noteClipboard;
+  const track = currentTrack();
+  if (!clip || !track || track.source !== "instrument" || !App.state || App.recording) return false;
+  const beatFrames = (App.state.sampleRate * 60) / Math.max(20, Number(App.state.click.BPM) || 120);
+  const snap = Math.max(1, Math.round(beatFrames / 4));
+  let start = Math.max(0, Math.round(App.frame / snap) * snap);
+  // Pasting where the copy was made would stack the notes on themselves.
+  if (start === clip.start) start = clip.start + clip.span;
+  const notes = clip.notes.map((note) => ({
+    pitch: note.pitch,
+    startFrame: start + note.startFrame,
+    lengthFrames: note.lengthFrames,
+    velocity: note.velocity,
+  }));
+  addPastedNotes(track, notes);
+  return true;
+}
+
+async function addPastedNotes(track, notes) {
+  const known = new Set((App.state.notes || []).map((note) => note.id));
+  const result = await dispatch("note.addMany", { trackId: track.id, notes });
+  if (!result) return;
+  const added = (result.state.notes || []).filter((note) => !known.has(note.id)).map((note) => note.id);
+  App.noteSelection = { trackId: track.id, ids: added };
+  renderInspector();
+  setStatus(`${notes.length} note${notes.length === 1 ? "" : "s"} pasted`);
+}
+
+// deleteSelectedNotes removes the piano-roll selection as one edit and reports
+// whether there was one, so timeline deletion stays the fallback.
+async function deleteSelectedNotes() {
+  const ids = selectedNoteIds();
+  if (!ids.length || App.recording) return false;
+  App.noteSelection = { trackId: App.noteSelection.trackId, ids: [] };
+  const result = await dispatch("note.removeMany", { noteIds: ids });
+  if (result) setStatus(`${ids.length} note${ids.length === 1 ? "" : "s"} deleted — Ctrl/Cmd+Z restores them`);
+  return true;
+}
+
+// deleteSelection removes the selected notes, then the selected clip or MIDI
+// motif, whichever the user last picked.
 async function deleteSelection() {
+  if (await deleteSelectedNotes()) return;
   const track = App.state?.tracks.find((candidate) => candidate.id === App.selectedMotifTrackId);
   if (track && motifNotes(track).length) return deleteMotif(track);
   const take = selectedTake();
@@ -736,6 +815,10 @@ function noteSection(track) {
     beatsPerBar: App.state.click.beatsPerBar,
     endBeat,
     view: App.editor,
+    selection: App.noteSelection.trackId === track.id ? App.noteSelection.ids : [],
+    onSelect: (ids) => {
+      App.noteSelection = { trackId: track.id, ids };
+    },
     onAdd: (pitch, startFrame, lengthFrames) => dispatch("note.add", {
       trackId: track.id,
       pitch,
@@ -744,7 +827,7 @@ function noteSection(track) {
       velocity: 100,
     }),
     onRemove: (noteId) => dispatch("note.remove", { noteId }),
-    onMove: (noteId, pitch, startFrame) => dispatch("note.move", { noteId, pitch, startFrame }),
+    onShift: (noteIds, pitchDelta, frameDelta) => dispatch("note.shift", { noteIds, pitchDelta, frameDelta }),
     onResize: (noteId, lengthFrames) => dispatch("note.resize", { noteId, lengthFrames }),
     onAudition: (pitch) => auditionInstrument(track, pitch),
     onView: (next) => Object.assign(App.editor, next),

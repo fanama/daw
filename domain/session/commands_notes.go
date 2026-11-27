@@ -20,6 +20,34 @@ func (s *Session) AddNote(trackID TrackID, pitch, startFrame, lengthFrames, velo
 	return note, nil
 }
 
+// AddNotes appends several notes to one instrument track in a single edit, so
+// pasting a copied selection stays one undo step.
+func (s *Session) AddNotes(trackID TrackID, specs []NoteSpec) ([]Note, error) {
+	index, err := s.trackIndex(trackID)
+	if err != nil {
+		return nil, err
+	}
+	if !s.tracks[index].source.IsInstrument() {
+		return nil, invalid("track %q is not an instrument track", s.tracks[index].name)
+	}
+	next := s.nextNote
+	added := make([]Note, 0, len(specs))
+	for _, spec := range specs {
+		note, err := newNote(NoteID(fmt.Sprintf("note_%d", next)), trackID, spec.Pitch, spec.StartFrame, spec.LengthFrames, spec.Velocity)
+		if err != nil {
+			return nil, err
+		}
+		added = append(added, note)
+		next++
+	}
+	if len(added) == 0 {
+		return nil, invalid("no notes to add")
+	}
+	s.nextNote = next
+	s.notes = append(s.notes, added...)
+	return added, nil
+}
+
 // RemoveNote deletes one note.
 func (s *Session) RemoveNote(id NoteID) error {
 	index, err := s.noteIndex(id)
@@ -54,6 +82,63 @@ func (s *Session) ClearNotes(trackID TrackID) error {
 	s.notes = kept
 	s.tracks[index].repeat = 0
 	s.tracks[index].patternFrames = 0
+	return nil
+}
+
+// RemoveNotes deletes several notes in one edit.
+func (s *Session) RemoveNotes(ids []NoteID) error {
+	removed := make(map[int]bool, len(ids))
+	for _, id := range ids {
+		index, err := s.noteIndex(id)
+		if err != nil {
+			return err
+		}
+		removed[index] = true
+	}
+	if len(removed) == 0 {
+		return invalid("no notes to remove")
+	}
+	kept := make([]Note, 0, len(s.notes))
+	for index, note := range s.notes {
+		if removed[index] {
+			continue
+		}
+		kept = append(kept, note)
+	}
+	s.notes = kept
+	return nil
+}
+
+// ShiftNotes moves several notes by the same pitch and time offset. Every note
+// is checked before any moves, so a refused drag leaves the motif untouched.
+func (s *Session) ShiftNotes(ids []NoteID, pitchDelta, frameDelta int) error {
+	indexes := make([]int, 0, len(ids))
+	seen := make(map[int]bool, len(ids))
+	for _, id := range ids {
+		index, err := s.noteIndex(id)
+		if err != nil {
+			return err
+		}
+		if seen[index] {
+			continue
+		}
+		seen[index] = true
+		note := s.notes[index]
+		if pitch := note.pitch + pitchDelta; pitch < MinNotePitch || pitch > MaxNotePitch {
+			return invalid("note pitch %d is outside 0..127", pitch)
+		}
+		if start := note.startFrame + frameDelta; start < 0 {
+			return invalid("note start must not be negative")
+		}
+		indexes = append(indexes, index)
+	}
+	if len(indexes) == 0 {
+		return invalid("no notes to move")
+	}
+	for _, index := range indexes {
+		s.notes[index].pitch += pitchDelta
+		s.notes[index].startFrame += frameDelta
+	}
 	return nil
 }
 

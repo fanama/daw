@@ -7,6 +7,7 @@ const ROWS = 24;
 const RULER_HEIGHT = 18;
 const VISIBLE_BEATS = 8;
 const SNAP_BEATS = 0.25;
+const MAX_PITCH = 127;
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const BLACK_KEYS = new Set([1, 3, 6, 8, 10]);
 const INSTRUMENT_OPTIONS = [["piano", "Piano"], ["bass", "Bass"], ["guitar", "Guitar"], ["drums", "Drums"]];
@@ -28,10 +29,10 @@ function pitchClass(pitch) {
 }
 
 function clampPitch(pitch) {
-  return Math.max(0, Math.min(127, Math.round(pitch)));
+  return Math.max(0, Math.min(MAX_PITCH, Math.round(pitch)));
 }
 
-export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, endBeat, view, onAdd, onRemove, onMove, onResize, onAudition, onView, onInstrument }) {
+export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, endBeat, view, selection, onSelect, onAdd, onRemove, onShift, onResize, onAudition, onView, onInstrument }) {
   const perBar = Math.max(1, Math.round(Number(beatsPerBar) || 4));
   const contentEnd = Math.max(0, Number(endBeat) || 0);
   const maxStart = Math.max(VISIBLE_BEATS, Math.ceil(contentEnd + perBar / 2));
@@ -46,18 +47,30 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
   instrument.value = track.instrument || "piano";
   instrument.addEventListener("change", () => onInstrument(instrument.value));
   const length = document.createElement("select");
-  length.title = "Length of new notes";
+  length.title = "Length of new notes, which follows the last note you created or resized";
   for (const [value, label] of LENGTH_OPTIONS) length.append(new Option(label, value));
   const state = {
     startBeat: Math.max(0, Math.min(maxStart, Number(view.startBeat) || 0)),
     lowPitch: Math.max(12, Math.min(96, Math.round(Number(view.lowPitch) || 48))),
-    lengthBeats: Math.max(0.25, Math.min(8, Number(view.lengthBeats) || 1)),
+    lengthBeats: Math.max(0.25, Math.min(64, Number(view.lengthBeats) || 1)),
   };
-  length.value = String(state.lengthBeats);
-  length.addEventListener("change", () => {
-    state.lengthBeats = Number(length.value);
-    onView({ lengthBeats: state.lengthBeats });
-  });
+  // rememberLength keeps the length used for new notes in step with the last
+  // note created or resized, so repeated edits stay the same size. A length off
+  // the preset list gets its own option so the toolbar never misreports it.
+  const rememberLength = (beats) => {
+    const value = Math.max(0.25, Math.min(64, Math.round(beats * 4) / 4));
+    state.lengthBeats = value;
+    for (const option of [...length.options]) {
+      if (!LENGTH_OPTIONS.some(([preset]) => preset === option.value)) option.remove();
+    }
+    if (![...length.options].some((option) => option.value === String(value))) {
+      length.append(new Option(`${value} beat${value === 1 ? "" : "s"}`, String(value)));
+    }
+    length.value = String(value);
+    onView({ lengthBeats: value });
+  };
+  rememberLength(state.lengthBeats);
+  length.addEventListener("change", () => rememberLength(Number(length.value)));
   const octaveDown = element("button", "", "8ve −");
   octaveDown.type = "button";
   octaveDown.title = "Show the octave below";
@@ -96,12 +109,31 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
 
   const canvas = document.createElement("canvas");
   canvas.className = "piano-roll";
-  canvas.setAttribute("aria-label", `Piano roll for ${track.name}. Click to add a note, drag to move it, drag its right edge to resize it, right-click to delete it.`);
-  canvas.title = "Wheel scrolls the timeline · Shift+wheel changes octave";
-  section.append(head, toolbar, canvas, element("p", "notes-hint", "Click to add · drag to move · drag the right edge to resize · wheel to scroll · right-click to delete · click a key to hear it."));
+  canvas.setAttribute("aria-label", `Piano roll for ${track.name}. Click to add a note, drag to move it, drag its right edge to resize it, drag on empty space to select several notes, Shift-click to add one to the selection, right-click to delete one.`);
+  canvas.title = "Wheel scrolls the timeline · Shift+wheel changes octave · drag on empty space to select notes";
+  section.append(head, toolbar, canvas, element("p", "notes-hint", "Click to add · drag on empty space to select several · Shift+click adds one to the selection · drag a selected note to move them together · drag the right edge to resize · Ctrl/Cmd+C copies them and Ctrl/Cmd+V pastes at the playhead · wheel to scroll · right-click to delete · click a key to hear it."));
 
   const framesPerBeat = () => (sampleRate * 60) / Math.max(20, Number(bpm) || 120);
+  const selected = new Set((selection || []).filter((id) => notes.some((note) => note.id === id)));
   let drag = null;
+  let marquee = null;
+
+  function reportSelection() {
+    onSelect?.([...selected]);
+  }
+
+  function selectedNotes() {
+    return notes.filter((note) => selected.has(note.id));
+  }
+
+  // limitDrag keeps the whole group inside the MIDI range and the session, so
+  // a drag never lands out of bounds and gets refused at release time.
+  function limitDrag() {
+    const pitches = drag.group.map((note) => note.pitch);
+    const firstStart = Math.min(...drag.group.map((note) => note.startFrame));
+    drag.pitchDelta = Math.max(-Math.min(...pitches), Math.min(MAX_PITCH - Math.max(...pitches), drag.pitchDelta));
+    drag.frameDelta = Math.max(-firstStart, drag.frameDelta);
+  }
 
   function geometry() {
     const width = canvas.clientWidth || 300;
@@ -148,16 +180,59 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
     return Math.abs(x - noteEndX(note, geo)) <= Math.min(6, Math.max(2, width / 2));
   }
 
-  function visibleNotes() {
-    if (!drag) return notes;
-    const list = notes.filter((note) => note.id !== drag.note.id);
-    list.push({
-      ...drag.note,
-      pitch: drag.pitch,
-      startFrame: drag.startFrame,
-      lengthFrames: drag.lengthFrames,
-    });
-    return list;
+  // noteBounds is the pixel box a note occupies, used by the selection
+  // rectangle. It matches the row band rather than the drawn note, so a sweep
+  // across a row is enough to catch its notes.
+  function noteBounds(note, geo) {
+    const beatFrames = framesPerBeat();
+    const left = KEY_WIDTH + (note.startFrame / beatFrames - state.startBeat) * geo.pxPerBeat;
+    const width = Math.max(4, (note.lengthFrames / beatFrames) * geo.pxPerBeat);
+    const row = ROWS - 1 - (note.pitch - state.lowPitch);
+    return {
+      left,
+      right: left + width,
+      top: RULER_HEIGHT + row * ROW_HEIGHT,
+      bottom: RULER_HEIGHT + (row + 1) * ROW_HEIGHT,
+    };
+  }
+
+  function marqueeBox(rect) {
+    return {
+      left: Math.min(rect.originX, rect.x),
+      right: Math.max(rect.originX, rect.x),
+      top: Math.min(rect.originY, rect.y),
+      bottom: Math.max(rect.originY, rect.y),
+    };
+  }
+
+  function inMarquee(note, geo, rect) {
+    const box = noteBounds(note, geo);
+    const area = marqueeBox(rect);
+    return box.right >= area.left && box.left <= area.right && box.bottom >= area.top && box.top <= area.bottom;
+  }
+
+  // highlightedNotes previews the sweep while it is being drawn, so notes light
+  // up as the rectangle passes over them.
+  function highlightedNotes(geo) {
+    if (!marquee?.moved) return selected;
+    const marked = new Set(marquee.base);
+    for (const note of notes) if (inMarquee(note, geo, marquee)) marked.add(note.id);
+    return marked;
+  }
+
+  // previewNote applies the drag in progress to one note, so the selection
+  // moves as a block while the session itself only changes on release.
+  function previewNote(note) {
+    if (!drag) return note;
+    if (drag.mode === "resize") {
+      return note.id === drag.anchor.id ? { ...note, lengthFrames: drag.lengthFrames } : note;
+    }
+    if (!selected.has(note.id)) return note;
+    return {
+      ...note,
+      pitch: clampPitch(note.pitch + drag.pitchDelta),
+      startFrame: Math.max(0, note.startFrame + drag.frameDelta),
+    };
   }
 
   function drawRows(context, geo) {
@@ -256,7 +331,8 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
   function drawNotes(context, geo) {
     const beatFrames = framesPerBeat();
     const radius = 3;
-    for (const note of visibleNotes()) {
+    const marked = highlightedNotes(geo);
+    for (const note of notes.map(previewNote)) {
       const beat = note.startFrame / beatFrames;
       const x = KEY_WIDTH + (beat - state.startBeat) * geo.pxPerBeat;
       const width = Math.max(4, (note.lengthFrames / beatFrames) * geo.pxPerBeat);
@@ -267,15 +343,35 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
       const top = RULER_HEIGHT + row * ROW_HEIGHT + 2;
       const noteWidth = Math.max(2, x + width - left);
       const noteHeight = ROW_HEIGHT - 4;
-      context.fillStyle = drag ? "#8be8c5" : "#3f9a7c";
+      const isSelected = marked.has(note.id);
+      const moving = Boolean(drag) && isSelected;
+      context.fillStyle = moving ? "#8be8c5" : isSelected ? "#7aa7ff" : "#3f9a7c";
       context.beginPath();
       context.roundRect(left, top, noteWidth, noteHeight, radius);
       context.fill();
+      if (isSelected) {
+        context.strokeStyle = "#e6ecf5";
+        context.lineWidth = 1;
+        context.stroke();
+      }
       if (noteWidth > 8) {
-        context.fillStyle = drag ? "#c8f6e6" : "#66e0b6";
+        context.fillStyle = moving ? "#c8f6e6" : isSelected ? "#b9cfff" : "#66e0b6";
         context.fillRect(left + radius, top, noteWidth - radius * 2, 1);
       }
     }
+  }
+
+  // drawMarquee paints the selection rectangle being dragged on empty grid.
+  function drawMarquee(context) {
+    if (!marquee?.moved) return;
+    const area = marqueeBox(marquee);
+    const width = area.right - area.left;
+    const height = area.bottom - area.top;
+    context.fillStyle = "rgba(122, 167, 255, 0.16)";
+    context.strokeStyle = "#7aa7ff";
+    context.lineWidth = 1;
+    context.fillRect(area.left, area.top, width, height);
+    context.strokeRect(area.left + 0.5, area.top + 0.5, width, height);
   }
 
   function paint() {
@@ -296,6 +392,7 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
     drawKeys(context);
     drawRuler(context, geo);
     drawNotes(context, geo);
+    drawMarquee(context);
   }
 
   function pointerPosition(event) {
@@ -315,25 +412,49 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
     }
     if (event.button === 2) {
       const note = noteHit(point.x, point.y, geo);
-      if (note) onRemove(note.id);
+      if (!note) return;
+      if (selected.delete(note.id)) reportSelection();
+      onRemove(note.id);
       return;
     }
     if (event.button !== 0) return;
     const hit = noteHit(point.x, point.y, geo);
     if (!hit) {
-      const pitch = pitchAtY(point.y);
-      const startFrame = Math.round(snappedBeat(point.x, geo.pxPerBeat) * framesPerBeat());
-      onAdd(pitch, Math.max(0, startFrame), Math.max(1, Math.round(state.lengthBeats * framesPerBeat())));
-      onAudition(pitch);
+      // A press on the empty grid starts a selection sweep; a plain click
+      // without movement still adds a note, as before.
+      marquee = {
+        originX: Math.max(KEY_WIDTH, point.x),
+        originY: Math.max(RULER_HEIGHT, point.y),
+        x: Math.max(KEY_WIDTH, point.x),
+        y: Math.max(RULER_HEIGHT, point.y),
+        base: event.shiftKey ? new Set(selected) : new Set(),
+        pointerId: event.pointerId,
+        moved: false,
+      };
+      canvas.setPointerCapture(event.pointerId);
+      canvas.style.cursor = "crosshair";
       return;
     }
-    const resizing = onResizeEdge(point.x, hit, geo);
+    if (event.shiftKey) {
+      if (!selected.delete(hit.id)) selected.add(hit.id);
+      reportSelection();
+      paint();
+      return;
+    }
+    if (!selected.has(hit.id)) {
+      selected.clear();
+      selected.add(hit.id);
+      reportSelection();
+    }
+    const group = selectedNotes();
+    const resizing = group.length === 1 && onResizeEdge(point.x, hit, geo);
     drag = {
-      note: hit,
+      anchor: hit,
+      group,
       mode: resizing ? "resize" : "move",
-      pitch: hit.pitch,
-      startFrame: hit.startFrame,
       lengthFrames: hit.lengthFrames,
+      pitchDelta: 0,
+      frameDelta: 0,
       originX: point.x,
       originY: point.y,
       pointerId: event.pointerId,
@@ -344,6 +465,14 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
     paint();
   });
   canvas.addEventListener("pointermove", (event) => {
+    if (marquee && marquee.pointerId === event.pointerId) {
+      const point = pointerPosition(event);
+      marquee.x = Math.max(KEY_WIDTH, point.x);
+      marquee.y = Math.max(RULER_HEIGHT, point.y);
+      marquee.moved = marquee.moved || Math.abs(point.x - marquee.originX) > 2 || Math.abs(point.y - marquee.originY) > 2;
+      paint();
+      return;
+    }
     if (!drag || drag.pointerId !== event.pointerId) {
       const point = pointerPosition(event);
       if (point.y < RULER_HEIGHT) {
@@ -364,14 +493,42 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
     if (drag.mode === "resize") {
       const endFrame = Math.round(snappedBeat(point.x, geo.pxPerBeat) * framesPerBeat());
       const shortest = Math.max(1, Math.round(SNAP_BEATS * framesPerBeat()));
-      drag.lengthFrames = Math.max(shortest, endFrame - drag.note.startFrame);
+      drag.lengthFrames = Math.max(shortest, endFrame - drag.anchor.startFrame);
     } else {
-      drag.startFrame = Math.max(0, Math.round(snappedBeat(point.x, geo.pxPerBeat) * framesPerBeat()));
-      drag.pitch = pitchAtY(point.y);
+      const beat = Math.round(beatAtX(point.x, geo.pxPerBeat) / SNAP_BEATS) * SNAP_BEATS;
+      drag.frameDelta = Math.round((beat - drag.anchor.startFrame / framesPerBeat()) * framesPerBeat());
+      drag.pitchDelta = pitchAtY(point.y) - drag.anchor.pitch;
+      limitDrag();
     }
     drag.moved = drag.moved || Math.abs(point.x - drag.originX) > 2 || Math.abs(point.y - drag.originY) > 2;
     paint();
   });
+  // finishMarquee commits the sweep: a real drag selects every note it crossed,
+  // a click on the empty grid adds one note and clears the selection.
+  const finishMarquee = (event, cancelled) => {
+    if (!marquee || marquee.pointerId !== event.pointerId) return;
+    const current = marquee;
+    marquee = null;
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    canvas.style.cursor = "crosshair";
+    if (cancelled) return paint();
+    if (!current.moved) {
+      const pitch = pitchAtY(current.originY);
+      const startFrame = Math.round(snappedBeat(current.originX, geometry().pxPerBeat) * framesPerBeat());
+      selected.clear();
+      reportSelection();
+      onAdd(pitch, Math.max(0, startFrame), Math.max(1, Math.round(state.lengthBeats * framesPerBeat())));
+      onAudition(pitch);
+      return paint();
+    }
+    const geo = geometry();
+    const next = current.base;
+    for (const note of notes) if (inMarquee(note, geo, current)) next.add(note.id);
+    selected.clear();
+    for (const id of next) selected.add(id);
+    reportSelection();
+    paint();
+  };
   const finishDrag = (event, cancelled) => {
     if (!drag || drag.pointerId !== event.pointerId) return;
     const current = drag;
@@ -381,16 +538,20 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
     paint();
     if (cancelled) return;
     const changed = current.mode === "resize"
-      ? current.lengthFrames !== current.note.lengthFrames
-      : current.pitch !== current.note.pitch || current.startFrame !== current.note.startFrame;
-    if (current.moved && changed && current.mode === "resize") onResize(current.note.id, current.lengthFrames);
-    else if (current.moved && changed) onMove(current.note.id, current.pitch, current.startFrame);
-    else if (!current.moved) onAudition(current.note.pitch);
+      ? current.lengthFrames !== current.anchor.lengthFrames
+      : current.pitchDelta !== 0 || current.frameDelta !== 0;
+    if (current.moved && changed && current.mode === "resize") {
+      rememberLength(current.lengthFrames / framesPerBeat());
+      onResize(current.anchor.id, current.lengthFrames);
+    } else if (current.moved && changed) {
+      onShift(current.group.map((note) => note.id), current.pitchDelta, current.frameDelta);
+    }
+    else if (!current.moved) onAudition(current.anchor.pitch);
   };
   // The roll is a window on the session, so the wheel pans it in time instead
   // of scrolling the page; Shift repeats the 8ve buttons for the pitch range.
   canvas.addEventListener("wheel", (event) => {
-    if (drag) return;
+    if (drag || marquee) return;
     event.preventDefault();
     if (event.shiftKey) {
       const step = Math.sign(event.deltaY) || 1;
@@ -401,8 +562,14 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
     if (!delta) return;
     applyView({ startBeat: state.startBeat + delta / Math.max(6, geometry().pxPerBeat) });
   }, { passive: false });
-  canvas.addEventListener("pointerup", (event) => finishDrag(event, false));
-  canvas.addEventListener("pointercancel", (event) => finishDrag(event, true));
+  canvas.addEventListener("pointerup", (event) => {
+    finishMarquee(event, false);
+    finishDrag(event, false);
+  });
+  canvas.addEventListener("pointercancel", (event) => {
+    finishMarquee(event, true);
+    finishDrag(event, true);
+  });
   window.requestAnimationFrame(paint);
   return section;
 }

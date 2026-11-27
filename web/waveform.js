@@ -1,6 +1,6 @@
 // Timeline rendering: peak envelopes per take, lane layout, ruler and playhead.
 
-import { contentEndFrame, noteSpan, patternLength, takeLength } from "./model.js";
+import { contentEndFrame, noteSpan, patternBeatFrames, patternLength, takeLength } from "./model.js";
 
 const RULER_HEIGHT = 22;
 const BUCKET_FRAMES = 256;
@@ -149,14 +149,15 @@ const LOOP_HANDLE = 10;
 // An instrument lane reads as one MIDI region: a tinted block from the first
 // note to the last, one dashed copy per loop, and a square loop handle at the
 // end that is dragged to add or remove repetitions.
-function drawMidiRegion(context, track, notes, y, laneHeight, layout, view) {
+function drawMidiRegion(context, track, notes, y, laneHeight, layout, view, beatFrames = 0) {
   const span = noteSpan(notes);
   if (!span) return null;
   const top = y + 14;
   const height = Math.max(8, laneHeight - 20);
   const x = (span.start - layout.startFrame) * layout.pxPerFrame;
   const previewFrames = view.patternPreview && view.patternPreview.trackId === track.id ? view.patternPreview.frames : null;
-  const pattern = Math.max(span.length, previewFrames === null ? patternLength(notes, track.patternFrames) : previewFrames);
+  // Instrument regions end on the beat, so the drawn block matches what loops.
+  const pattern = Math.max(span.length, patternLength(notes, previewFrames === null ? track.patternFrames : previewFrames, beatFrames));
   const width = Math.max(3, pattern * layout.pxPerFrame);
   const preview = view.loopPreview && view.loopPreview.trackId === track.id ? view.loopPreview.repeats : null;
   const repeats = Math.max(0, Math.min(32, preview === null ? Number(track.repeat) || 0 : preview));
@@ -344,7 +345,7 @@ export function drawTimeline(canvas, view) {
     if (midiLane) {
       const notes = Array.isArray(state.notes) ? state.notes : [];
       const trackNotes = notes.filter((note) => note.trackId === track.id);
-      const handle = drawMidiRegion(context, track, trackNotes, y, laneHeight, layout, view);
+      const handle = drawMidiRegion(context, track, trackNotes, y, laneHeight, layout, view, patternBeatFrames(state));
       if (handle) midiHandles.push(handle);
     }
     for (const take of state.takes) {

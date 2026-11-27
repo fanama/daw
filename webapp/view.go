@@ -118,6 +118,10 @@ type request struct {
 	TrackID      string       `json:"trackId"`
 	TakeID       string       `json:"takeId"`
 	NoteID       string       `json:"noteId"`
+	NoteIDs      []string     `json:"noteIds"`
+	Notes        []webNote    `json:"notes"`
+	PitchDelta   int          `json:"pitchDelta"`
+	FrameDelta   int          `json:"frameDelta"`
 	MarkerID     string       `json:"markerId"`
 	Frame        int          `json:"frame"`
 	Source       string       `json:"source"`

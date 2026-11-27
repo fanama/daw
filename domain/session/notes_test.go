@@ -122,6 +122,65 @@ func TestNoteCommandsRejectAVoiceTrackAndBadPitch(t *testing.T) {
 	}
 }
 
+func TestNoteBatchAddShiftAndRemove(t *testing.T) {
+	s := newSession(t)
+	track, err := s.AddTrackWithSource("Keys", session.InstrumentSource(session.InstrumentPiano))
+	if err != nil {
+		t.Fatalf("add instrument track: %v", err)
+	}
+	if _, err := s.AddNotes(track.ID(), nil); !session.IsCode(err, session.CodeInvalid) {
+		t.Fatalf("an empty batch must be refused, got %v", err)
+	}
+	added, err := s.AddNotes(track.ID(), []session.NoteSpec{
+		{Pitch: 60, StartFrame: 0, LengthFrames: 960, Velocity: 100},
+		{Pitch: 64, StartFrame: 960, LengthFrames: 960, Velocity: 100},
+		{Pitch: 67, StartFrame: 1920, LengthFrames: 960, Velocity: 100},
+	})
+	if err != nil {
+		t.Fatalf("add notes: %v", err)
+	}
+	if len(added) != 3 || len(s.TrackNotes(track.ID())) != 3 {
+		t.Fatalf("expected three notes, got %d and %d", len(added), len(s.TrackNotes(track.ID())))
+	}
+	ids := make([]session.NoteID, 0, len(added))
+	for index, note := range added {
+		if index > 0 && note.ID() == added[index-1].ID() {
+			t.Fatalf("batch notes share an identifier: %s", note.ID())
+		}
+		ids = append(ids, note.ID())
+	}
+
+	if err := s.ShiftNotes(ids, 2, 480); err != nil {
+		t.Fatalf("shift notes: %v", err)
+	}
+	for index, note := range s.TrackNotes(track.ID()) {
+		wantPitch := []int{62, 66, 69}[index]
+		wantStart := []int{480, 1440, 2400}[index]
+		if note.Pitch() != wantPitch || note.StartFrame() != wantStart {
+			t.Fatalf("note %d did not shift: %+v", index, note)
+		}
+	}
+	if err := s.ShiftNotes(ids, 1000, 0); !session.IsCode(err, session.CodeInvalid) {
+		t.Fatalf("a pitch outside 0..127 must be refused, got %v", err)
+	}
+	if err := s.ShiftNotes(ids, 0, -100000); !session.IsCode(err, session.CodeInvalid) {
+		t.Fatalf("a negative start must be refused, got %v", err)
+	}
+	if kept := s.TrackNotes(track.ID()); kept[0].Pitch() != 62 || kept[0].StartFrame() != 480 {
+		t.Fatalf("a refused shift must change nothing: %+v", kept[0])
+	}
+
+	if err := s.RemoveNotes(ids[:2]); err != nil {
+		t.Fatalf("remove notes: %v", err)
+	}
+	if kept := s.TrackNotes(track.ID()); len(kept) != 1 || kept[0].ID() != ids[2] {
+		t.Fatalf("unexpected notes left: %+v", kept)
+	}
+	if err := s.RemoveNotes(ids[:1]); !session.IsCode(err, session.CodeNotFound) {
+		t.Fatalf("removing a missing note must fail, got %v", err)
+	}
+}
+
 func TestClearNotesDeletesTheWholeMotif(t *testing.T) {
 	s := newSession(t)
 	track, err := s.AddTrackWithSource("Keys", session.InstrumentSource(session.InstrumentPiano))

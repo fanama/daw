@@ -22,6 +22,14 @@ type Note struct {
 	velocity     int
 }
 
+// NoteSpec is a note to add: its pitch and timing, before it has an identity.
+type NoteSpec struct {
+	Pitch        int
+	StartFrame   int
+	LengthFrames int
+	Velocity     int
+}
+
 func newNote(id NoteID, trackID TrackID, pitch, startFrame, lengthFrames, velocity int) (Note, error) {
 	if pitch < MinNotePitch || pitch > MaxNotePitch {
 		return Note{}, invalid("note pitch %d is outside 0..127", pitch)

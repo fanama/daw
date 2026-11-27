@@ -14,6 +14,40 @@ func (s *Service) AddNote(trackID session.TrackID, pitch, startFrame, lengthFram
 	return note, s.Save()
 }
 
+// AddNotes appends several notes in one edit, so pasting a copied selection is
+// a single undo step.
+func (s *Service) AddNotes(trackID session.TrackID, specs []session.NoteSpec) error {
+	if err := s.requireSession(); err != nil {
+		return err
+	}
+	if _, err := s.current.AddNotes(trackID, specs); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
+// RemoveNotes deletes several notes in one edit.
+func (s *Service) RemoveNotes(ids []session.NoteID) error {
+	if err := s.requireSession(); err != nil {
+		return err
+	}
+	if err := s.current.RemoveNotes(ids); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
+// ShiftNotes moves several notes together by the same offset.
+func (s *Service) ShiftNotes(ids []session.NoteID, pitchDelta, frameDelta int) error {
+	if err := s.requireSession(); err != nil {
+		return err
+	}
+	if err := s.current.ShiftNotes(ids, pitchDelta, frameDelta); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
 // RemoveNote deletes one note.
 func (s *Service) RemoveNote(id session.NoteID) error {
 	if err := s.requireSession(); err != nil {

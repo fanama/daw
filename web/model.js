@@ -33,19 +33,34 @@ export function noteSpan(notes) {
 }
 
 // patternLength is the looped length of an instrument pattern: the notes' span,
-// unless the region was widened past its last note.
-export function patternLength(notes, patternFrames = 0) {
+// unless the region was widened past its last note. Instrument patterns pass
+// the length of one beat so the loop closes on the beat after the last note
+// instead of restarting between two beats.
+export function patternLength(notes, patternFrames = 0, beatFrames = 0) {
   const span = noteSpan(notes);
   if (!span) return 0;
-  return Math.max(span.length, Math.max(0, Number(patternFrames) || 0));
+  const length = Math.max(span.length, Math.max(0, Number(patternFrames) || 0));
+  const beat = Number(beatFrames) || 0;
+  if (beat <= 0) return length;
+  return Math.ceil((span.start + length) / beat) * beat - span.start;
+}
+
+// patternBeatFrames is the grid every instrument pattern closes on: one beat, so
+// a loop never restarts between two beats. It is 0 without a sample rate, which
+// leaves the loop on the exact span of the notes.
+export function patternBeatFrames(state) {
+  const sampleRate = Number(state?.sampleRate) || 0;
+  if (!sampleRate) return 0;
+  const bpm = Math.max(20, Number(state?.click?.BPM) || 120);
+  return (sampleRate * 60) / bpm;
 }
 
 // repeatedNotes returns the pattern plus its looped copies. Repetitions are
 // derived, so the piano roll always edits the original pattern.
-export function repeatedNotes(notes, repeats = 0, patternFrames = 0) {
+export function repeatedNotes(notes, repeats = 0, patternFrames = 0, beatFrames = 0) {
   const span = noteSpan(notes);
   if (!span || repeats <= 0) return notes;
-  const length = patternLength(notes, patternFrames);
+  const length = patternLength(notes, patternFrames, beatFrames);
   const copies = [];
   for (let copy = 1; copy <= repeats; copy++) {
     for (const note of notes) copies.push({ ...note, startFrame: note.startFrame + length * copy });
@@ -63,7 +78,7 @@ export function audibleNoteTracks(state) {
     if (track.muted || (state.anySolo && !track.soloed)) continue;
     const trackNotes = notes.filter((note) => note.trackId === track.id);
     if (trackNotes.length) {
-      selection.push({ track, notes: repeatedNotes(trackNotes, Number(track.repeat) || 0, track.patternFrames) });
+      selection.push({ track, notes: repeatedNotes(trackNotes, Number(track.repeat) || 0, track.patternFrames, patternBeatFrames(state)) });
     }
   }
   return selection;
@@ -77,7 +92,7 @@ export function notesEndFrame(state) {
     const span = noteSpan(trackNotes);
     if (!span) continue;
     const repeats = Math.max(0, Number(track.repeat) || 0);
-    end = Math.max(end, span.start + patternLength(trackNotes, track.patternFrames) * (1 + repeats));
+    end = Math.max(end, span.start + patternLength(trackNotes, track.patternFrames, patternBeatFrames(state)) * (1 + repeats));
   }
   return end;
 }
