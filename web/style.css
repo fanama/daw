@@ -405,6 +405,15 @@ button.mini.wide { width: 40px; font-size: 9px; letter-spacing: 0.04em; }
 
 .notes-count { font-size: 11px; color: var(--muted); }
 
+.notes-key {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.notes-key b { color: #cfe0ff; font-weight: 600; }
+
 .notes-toolbar {
   display: flex;
   flex-wrap: wrap;

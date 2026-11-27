@@ -108,6 +108,9 @@ func (c *core) applyTrack(req request) error {
 	case "track.add":
 		_, err := c.service.AddTrackWithSource(req.Name, trackSource(req))
 		return err
+	case "track.transcribe":
+		_, err := c.service.AddTrackWithNotes(req.Name, session.Instrument(req.Instrument), noteSpecs(req.Notes))
+		return err
 	case "track.rename":
 		return c.service.RenameTrack(trackID, req.Name)
 	case "track.remove":

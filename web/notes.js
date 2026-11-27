@@ -1,6 +1,8 @@
 // Inline piano-roll editor for instrument tracks. Notes are stored in session
 // frames; the grid follows the click tempo so a bar lines up with the transport.
 
+import { detectKey } from "./scale.js";
+
 const KEY_WIDTH = 36;
 const ROW_HEIGHT = 13;
 const ROWS = 24;
@@ -8,6 +10,12 @@ const RULER_HEIGHT = 18;
 const VISIBLE_BEATS = 8;
 const SNAP_BEATS = 0.25;
 const MAX_PITCH = 127;
+// The keyboard shows two octaves and the wheel walks it: 30 pixels of wheel per
+// key, so a notch moves a few keys and a trackpad swipe moves one at a time.
+const OCTAVE = 12;
+const MIN_KEY = 12;
+const MAX_KEY = 96;
+const PITCH_WHEEL = 30;
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const BLACK_KEYS = new Set([1, 3, 6, 8, 10]);
 const INSTRUMENT_OPTIONS = [["piano", "Piano"], ["bass", "Bass"], ["guitar", "Guitar"], ["drums", "Drums"]];
@@ -40,6 +48,16 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
   const head = element("div", "notes-head");
   head.append(element("h3", "", "Piano roll"));
   head.append(element("span", "notes-count", `${notes.length} note${notes.length === 1 ? "" : "s"}`));
+  // The part's key is read from its notes, so an extracted melody tells which
+  // scale it is in and which notes carry it: tonic, third and dominant.
+  const key = detectKey(notes);
+  const keyLine = element("p", "notes-key");
+  if (key) {
+    keyLine.append(
+      element("b", "", key.name),
+      document.createTextNode(` · scale ${key.scale.join(" ")} · tonic ${key.tonicName} · 3rd ${key.thirdName} · 5th ${key.fifthName}`),
+    );
+  }
   const toolbar = element("div", "notes-toolbar");
   const instrument = document.createElement("select");
   instrument.title = "Instrument sound";
@@ -51,7 +69,7 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
   for (const [value, label] of LENGTH_OPTIONS) length.append(new Option(label, value));
   const state = {
     startBeat: Math.max(0, Math.min(maxStart, Number(view.startBeat) || 0)),
-    lowPitch: Math.max(12, Math.min(96, Math.round(Number(view.lowPitch) || 48))),
+    lowPitch: Math.max(MIN_KEY, Math.min(MAX_KEY, Math.round(Number(view.lowPitch) || 48))),
     lengthBeats: Math.max(0.25, Math.min(64, Number(view.lengthBeats) || 1)),
   };
   // rememberLength keeps the length used for new notes in step with the last
@@ -94,15 +112,19 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
   };
   const applyView = (next) => {
     Object.assign(state, next);
-    state.lowPitch = Math.max(12, Math.min(96, state.lowPitch));
+    state.lowPitch = Math.max(MIN_KEY, Math.min(MAX_KEY, state.lowPitch));
     state.startBeat = Math.max(0, Math.min(maxStart, state.startBeat));
     scroll.value = String(state.startBeat);
     scrollValue.textContent = positionLabel(state.startBeat);
     onView({ ...state });
     paint();
   };
-  octaveDown.addEventListener("click", () => applyView({ lowPitch: state.lowPitch - 12 }));
-  octaveUp.addEventListener("click", () => applyView({ lowPitch: state.lowPitch + 12 }));
+  const shiftOctave = (delta) => {
+    applyView({ lowPitch: state.lowPitch + delta });
+    wheelPitch = state.lowPitch;
+  };
+  octaveDown.addEventListener("click", () => shiftOctave(-OCTAVE));
+  octaveUp.addEventListener("click", () => shiftOctave(OCTAVE));
   scroll.addEventListener("input", () => applyView({ startBeat: Number(scroll.value) }));
   scrollValue.textContent = positionLabel(state.startBeat);
   toolbar.append(element("span", "unit", "sound"), instrument, length, octaveDown, octaveUp, scrollWrap);
@@ -110,13 +132,16 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
   const canvas = document.createElement("canvas");
   canvas.className = "piano-roll";
   canvas.setAttribute("aria-label", `Piano roll for ${track.name}. Click to add a note, drag to move it, drag its right edge to resize it, drag on empty space to select several notes, Shift-click to add one to the selection, right-click to delete one.`);
-  canvas.title = "Wheel scrolls the timeline · Shift+wheel changes octave · drag on empty space to select notes";
-  section.append(head, toolbar, canvas, element("p", "notes-hint", "Click to add · drag on empty space to select several · Shift+click adds one to the selection · drag a selected note to move them together · drag the right edge to resize · Ctrl/Cmd+C copies them and Ctrl/Cmd+V pastes at the playhead · wheel to scroll · right-click to delete · click a key to hear it."));
+  canvas.title = "Wheel scrolls the keyboard · Shift+wheel scrolls the timeline · drag on empty space to select notes";
+  section.append(head, key ? keyLine : document.createDocumentFragment(), toolbar, canvas, element("p", "notes-hint", "Click to add · drag on empty space to select several · Shift+click adds one to the selection · drag a selected note to move them together · drag the right edge to resize · Ctrl/Cmd+C copies them and Ctrl/Cmd+V pastes at the playhead · wheel scrolls the keyboard up and down · Shift+wheel scrolls the timeline · right-click to delete · click a key to hear it."));
 
   const framesPerBeat = () => (sampleRate * 60) / Math.max(20, Number(bpm) || 120);
   const selected = new Set((selection || []).filter((id) => notes.some((note) => note.id === id)));
   let drag = null;
   let marquee = null;
+  // wheelPitch keeps the wheel's sub-semitone remainder, so a slow trackpad
+  // swipe still walks the keyboard one key at a time.
+  let wheelPitch = state.lowPitch;
 
   function reportSelection() {
     onSelect?.([...selected]);
@@ -548,19 +573,25 @@ export function buildNoteEditor({ track, notes, sampleRate, bpm, beatsPerBar, en
     }
     else if (!current.moved) onAudition(current.anchor.pitch);
   };
-  // The roll is a window on the session, so the wheel pans it in time instead
-  // of scrolling the page; Shift repeats the 8ve buttons for the pitch range.
+  // The roll shows two octaves at a time, so the wheel walks the keyboard
+  // vertically the way a piano does; Shift and a sideways gesture pan it in time
+  // instead of scrolling the page.
+  const scrollPitch = (delta) => {
+    wheelPitch = Math.max(MIN_KEY, Math.min(MAX_KEY, wheelPitch - delta / PITCH_WHEEL));
+    const lowPitch = Math.round(wheelPitch);
+    if (lowPitch !== state.lowPitch) applyView({ lowPitch });
+  };
   canvas.addEventListener("wheel", (event) => {
     if (drag || marquee) return;
     event.preventDefault();
-    if (event.shiftKey) {
-      const step = Math.sign(event.deltaY) || 1;
-      applyView({ lowPitch: state.lowPitch - step });
+    const sideways = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY);
+    if (sideways) {
+      const delta = event.shiftKey ? event.deltaY : event.deltaX;
+      if (!delta) return;
+      applyView({ startBeat: state.startBeat + delta / Math.max(6, geometry().pxPerBeat) });
       return;
     }
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-    if (!delta) return;
-    applyView({ startBeat: state.startBeat + delta / Math.max(6, geometry().pxPerBeat) });
+    if (event.deltaY) scrollPitch(event.deltaY);
   }, { passive: false });
   canvas.addEventListener("pointerup", (event) => {
     finishMarquee(event, false);

@@ -48,6 +48,25 @@ func (s *Service) ShiftNotes(ids []session.NoteID, pitchDelta, frameDelta int) e
 	return s.Save()
 }
 
+// AddTrackWithNotes creates an instrument track and fills it in one edit, so an
+// extracted MIDI part is a single undo step.
+func (s *Service) AddTrackWithNotes(name string, instrument session.Instrument, specs []session.NoteSpec) (session.Track, error) {
+	if err := s.requireSession(); err != nil {
+		return session.Track{}, err
+	}
+	track, err := s.current.AddTrackWithSource(name, session.InstrumentSource(instrument))
+	if err != nil {
+		return session.Track{}, err
+	}
+	if _, err := s.current.AddNotes(track.ID(), specs); err != nil {
+		// The notes are refused as a whole, so drop the empty track rather than
+		// leaving a half-applied edit behind.
+		_, _ = s.current.RemoveTrack(track.ID())
+		return session.Track{}, err
+	}
+	return track, s.Save()
+}
+
 // RemoveNote deletes one note.
 func (s *Service) RemoveNote(id session.NoteID) error {
 	if err := s.requireSession(); err != nil {

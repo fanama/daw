@@ -7,6 +7,7 @@ import { clipAt, computePeaks, drawTimeline, frameAtX, markerAtX, midiLoopHandle
 import { audibleNoteTracks, audibleTakes, formatDuration, takeLength } from "./model.js";
 import { buildNoteEditor } from "./notes.js";
 import { buildDrumEditor } from "./drums.js";
+import { transcribeTake } from "./transcribe.js";
 import { effectGraph } from "./fxgraph.js";
 import { effectsFromPreset, effectsToPreset } from "./effects-preset.js";
 import { FACTORY_PRESETS } from "./effects-factory-presets.js";
@@ -881,13 +882,16 @@ function takeRow(track, take, index) {
   active.addEventListener("change", () => dispatch("take.active", { trackId: track.id, takeId: take.id }));
   const name = element("span", "take-name", `take ${index + 1}${take.incomplete ? " · partial" : ""}`);
   const meta = element("span", "take-meta", formatDuration(takeLength(take) / take.sampleRate));
+  const extract = element("button", "", "MIDI");
+  extract.title = "Extract the melody of this take into a MIDI track";
+  extract.addEventListener("click", () => extractMidi(take));
   const normalize = element("button", "", "normalize");
   normalize.title = "Set the gain so the loudest peak reaches -1 dBFS";
   normalize.addEventListener("click", () => normalizeTake(take));
   const remove = element("button", "", "×");
   remove.title = "Delete this take";
   remove.addEventListener("click", () => deleteTake(take.id));
-  head.append(active, name, meta, normalize, remove);
+  head.append(active, name, meta, extract, normalize, remove);
   const controls = element("div", "take-controls");
   const muteLabel = document.createElement("label");
   const mute = document.createElement("input");
@@ -942,6 +946,48 @@ async function normalizeTake(take) {
     setStatus(error.message, "error");
   } finally {
     window.fanamixClearPCM(take.file);
+  }
+}
+
+// extractMidi reads the take on the page and stores the top line it heard as
+// one instrument track, without a chord part.
+async function extractMidi(take) {
+  const audio = App.pcm.get(take.file);
+  if (!audio) return setStatus("This take's audio is not loaded.", "error");
+  const channels = Math.max(1, audio.channels);
+  const trimStart = Math.max(0, take.trim.startFrame);
+  const trimEnd = take.trim.endFrame > trimStart ? take.trim.endFrame : take.lengthFrames;
+  const first = Math.min(audio.samples.length, trimStart * channels);
+  const last = Math.min(audio.samples.length, Math.max(first + channels, trimEnd * channels));
+  const track = currentTrack();
+  const base = track ? track.name : "Take";
+  setStatus("Listening to the take…", "busy");
+  await nextPaint();
+  try {
+    const result = transcribeTake({
+      samples: audio.samples.subarray(first, last),
+      channels,
+      sampleRate: audio.sampleRate,
+      bpm: App.state.click.BPM,
+    });
+    if (!result.melody.length) return setStatus("No notes were found in this take.", "error");
+    // Notes come back in the take's own sample rate, which need not be the
+    // session's: the grid they land on must be measured in session frames.
+    const scale = App.state.sampleRate / audio.sampleRate;
+    const toSession = (notes) => notes.map((note) => ({
+      pitch: note.pitch,
+      startFrame: Math.round(take.startFrame + trimStart + note.startFrame * scale),
+      lengthFrames: Math.max(1, Math.round(note.lengthFrames * scale)),
+      velocity: note.velocity,
+    }));
+    const added = await dispatch("track.transcribe", { name: `${base} melody`, instrument: "piano", notes: toSession(result.melody) });
+    const tracks = added?.state?.tracks || [];
+    if (tracks.length) selectTrack(tracks[tracks.length - 1].id);
+    const cut = result.truncated ? ", first 3 minutes only" : "";
+    const beat = result.tempo ? ` at ${Math.round(result.tempo)} BPM` : "";
+    setStatus(`Extracted ${result.melody.length} melody notes${beat}${cut}`);
+  } catch (error) {
+    setStatus(error.message, "error");
   }
 }
 
